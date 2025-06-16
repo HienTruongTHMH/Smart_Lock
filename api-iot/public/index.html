@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Lock - Quản lý thẻ RFID</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md">
+            <!-- Header -->
+            <div class="text-center mb-8">
+                <div class="bg-blue-500 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-3a1 1 0 011-1h2.586l6.414-6.414A6 6 0 0119 9z"></path>
+                    </svg>
+                </div>
+                <h1 class="text-2xl font-bold text-gray-800">Smart Lock Manager</h1>
+                <p class="text-gray-600 mt-2">Quản lý thẻ RFID</p>
+            </div>
+
+            <!-- API Test -->
+            <div class="space-y-4">
+                <button id="testAPI" class="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition">
+                    Test API Connection
+                </button>
+                
+                <button id="testDB" class="w-full bg-green-500 text-white py-2 rounded-lg hover:bg-green-600 transition">
+                    Test Database
+                </button>
+                
+                <div id="result" class="mt-4 p-4 bg-gray-100 rounded-lg hidden">
+                    <pre id="resultText" class="text-sm"></pre>
+                </div>
+            </div>
+
+            <!-- Form đăng ký thẻ -->
+            <div class="mt-8 space-y-4">
+                <h3 class="text-lg font-semibold">Đăng ký thẻ mới</h3>
+                
+                <input type="text" id="userName" placeholder="Tên người dùng" 
+                       class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+                
+                <input type="password" id="privatePassword" placeholder="Mật khẩu riêng" 
+                       class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+                
+                <input type="password" id="publicPassword" placeholder="Mật khẩu chung" 
+                       class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+                
+                <div class="flex gap-2">
+                    <input type="text" id="cardUID" placeholder="UID thẻ" readonly
+                           class="flex-1 px-4 py-2 border rounded-lg bg-gray-50">
+                    <button id="generateUID" class="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600">
+                        Gen UID
+                    </button>
+                </div>
+                
+                <button id="registerCard" class="w-full bg-purple-500 text-white py-2 rounded-lg hover:bg-purple-600 transition">
+                    Đăng ký thẻ
+                </button>
+            </div>
+
+            <!-- Danh sách thẻ -->
+            <div class="mt-8">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold">Danh sách thẻ</h3>
+                    <button id="loadCards" class="px-3 py-1 bg-gray-500 text-white rounded text-sm hover:bg-gray-600">
+                        Tải lại
+                    </button>
+                </div>
+                <div id="cardList" class="space-y-2 max-h-40 overflow-y-auto">
+                    <!-- Cards will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+
+        // Test API
+        document.getElementById('testAPI').addEventListener('click', async () => {
+            try {
+                const response = await fetch(API_BASE + '/');
+                const data = await response.json();
+                showResult(data);
+            } catch (error) {
+                showResult({ error: error.message });
+            }
+        });
+
+        // Test Database
+        document.getElementById('testDB').addEventListener('click', async () => {
+            try {
+                const response = await fetch(API_BASE + '/api/test-db');
+                const data = await response.json();
+                showResult(data);
+            } catch (error) {
+                showResult({ error: error.message });
+            }
+        });
+
+        // Generate UID
+        document.getElementById('generateUID').addEventListener('click', () => {
+            const uid = Array.from({length: 8}, () => Math.floor(Math.random() * 16).toString(16).toUpperCase()).join('');
+            document.getElementById('cardUID').value = uid;
+        });
+
+        // Register Card
+        document.getElementById('registerCard').addEventListener('click', async () => {
+            const userName = document.getElementById('userName').value;
+            const privatePassword = document.getElementById('privatePassword').value;
+            const publicPassword = document.getElementById('publicPassword').value;
+            const uid = document.getElementById('cardUID').value;
+
+            if (!userName || !privatePassword || !publicPassword || !uid) {
+                alert('Vui lòng điền đầy đủ thông tin!');
+                return;
+            }
+
+            try {
+                const response = await fetch(API_BASE + '/api/register-card', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userName, privatePassword, publicPassword, uid })
+                });
+                
+                const data = await response.json();
+                showResult(data);
+                
+                if (response.ok) {
+                    // Clear form
+                    document.getElementById('userName').value = '';
+                    document.getElementById('privatePassword').value = '';
+                    document.getElementById('publicPassword').value = '';
+                    document.getElementById('cardUID').value = '';
+                    loadCards();
+                }
+            } catch (error) {
+                showResult({ error: error.message });
+            }
+        });
+
+        // Load Cards
+        async function loadCards() {
+            try {
+                const response = await fetch(API_BASE + '/api/get-cards');
+                const data = await response.json();
+                
+                const cardList = document.getElementById('cardList');
+                if (data.success && data.cards) {
+                    cardList.innerHTML = data.cards.map(card => `
+                        <div class="bg-gray-50 p-3 rounded-lg flex justify-between items-center">
+                            <div>
+                                <p class="font-medium">${card.user_name}</p>
+                                <p class="text-sm text-gray-600">UID: ${card.uid}</p>
+                            </div>
+                            <button onclick="deleteCard('${card.id_user}')" 
+                                    class="text-red-500 hover:text-red-700 text-sm">Xóa</button>
+                        </div>
+                    `).join('');
+                } else {
+                    cardList.innerHTML = '<p class="text-gray-500 text-center">Chưa có thẻ nào</p>';
+                }
+            } catch (error) {
+                console.error('Error loading cards:', error);
+            }
+        }
+
+        // Delete Card
+        async function deleteCard(id) {
+            if (!confirm('Bạn có chắc muốn xóa thẻ này?')) return;
+            
+            try {
+                const response = await fetch(API_BASE + `/api/delete-card/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    loadCards();
+                    showResult({ message: 'Xóa thẻ thành công!' });
+                }
+            } catch (error) {
+                showResult({ error: error.message });
+            }
+        }
+
+        // Show Result
+        function showResult(data) {
+            const resultDiv = document.getElementById('result');
+            const resultText = document.getElementById('resultText');
+            
+            resultText.textContent = JSON.stringify(data, null, 2);
+            resultDiv.classList.remove('hidden');
+            
+            setTimeout(() => {
+                resultDiv.classList.add('hidden');
+            }, 5000);
+        }
+
+        // Load cards and test API buttons
+        document.getElementById('loadCards').addEventListener('click', loadCards);
+
+        // Load cards on page load
+        window.addEventListener('load', loadCards);
+    </script>
+</body>
+</html>
