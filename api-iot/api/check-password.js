@@ -19,11 +19,15 @@ module.exports = async (req, res) => {
   }
 
   try {
+    // Cập nhật query để phù hợp với schema của bạn
     const result = await pool.query(
-      'SELECT * FROM passwords WHERE pass = $1',
+      'SELECT * FROM management WHERE pwd_private = $1 OR pwd_public = $1',
       [password]
     );
-    res.json({ valid: result.rows.length > 0 });
+    res.json({ 
+      valid: result.rows.length > 0,
+      user: result.rows[0] || null
+    });
   } catch (err) {
     res.status(500).json({ error: "Database error", detail: err.message });
   }

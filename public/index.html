@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Lock - Quản lý thẻ RFID</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'smart-blue': '#3B82F6',
+                        'smart-green': '#10B981',
+                        'smart-red': '#EF4444'
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md">
+            <!-- Header -->
+            <div class="text-center mb-8">
+                <div class="bg-smart-blue rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-3a1 1 0 011-1h2.586l6.414-6.414A6 6 0 0119 9z"></path>
+                    </svg>
+                </div>
+                <h1 class="text-2xl font-bold text-gray-800">Smart Lock Manager</h1>
+                <p class="text-gray-600 mt-2">Quản lý thẻ RFID</p>
+            </div>
+
+            <!-- Form đăng ký thẻ mới -->
+            <div id="registerForm" class="space-y-6">
+                <h2 class="text-xl font-semibold text-gray-700 text-center">Đăng ký thẻ mới</h2>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Tên người dùng</label>
+                    <input type="text" id="userName" 
+                           class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-smart-blue focus:border-transparent outline-none transition"
+                           placeholder="Nhập tên người dùng">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Mật khẩu riêng</label>
+                    <input type="password" id="privatePassword" 
+                           class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-smart-blue focus:border-transparent outline-none transition"
+                           placeholder="Nhập mật khẩu riêng">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Mật khẩu chung</label>
+                    <input type="password" id="publicPassword" 
+                           class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-smart-blue focus:border-transparent outline-none transition"
+                           placeholder="Nhập mật khẩu chung">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">UID Thẻ</label>
+                    <div class="relative">
+                        <input type="text" id="cardUID" 
+                               class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-smart-blue focus:border-transparent outline-none transition"
+                               placeholder="Quét thẻ để lấy UID..." readonly>
+                        <button type="button" id="scanButton" 
+                                class="absolute right-2 top-2 bg-smart-blue text-white px-4 py-2 rounded-md hover:bg-blue-600 transition text-sm">
+                            Quét thẻ
+                        </button>
+                    </div>
+                </div>
+
+                <button type="button" id="registerButton" 
+                        class="w-full bg-smart-green text-white py-3 rounded-lg font-semibold hover:bg-green-600 transition disabled:opacity-50 disabled:cursor-not-allowed">
+                    Đăng ký thẻ
+                </button>
+            </div>
+
+            <!-- Status messages -->
+            <div id="statusMessage" class="mt-6 hidden"></div>
+
+            <!-- Danh sách thẻ đã đăng ký -->
+            <div class="mt-8">
+                <h3 class="text-lg font-semibold text-gray-700 mb-4">Thẻ đã đăng ký</h3>
+                <div id="cardList" class="space-y-2 max-h-40 overflow-y-auto">
+                    <!-- Cards will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // API base URL - thay đổi thành URL server của bạn
+        const API_BASE_URL = 'http://localhost:3000';
+
+        // Elements
+        const scanButton = document.getElementById('scanButton');
+        const registerButton = document.getElementById('registerButton');
+        const cardUIDInput = document.getElementById('cardUID');
+        const userNameInput = document.getElementById('userName');
+        const privatePasswordInput = document.getElementById('privatePassword');
+        const publicPasswordInput = document.getElementById('publicPassword');
+        const statusMessage = document.getElementById('statusMessage');
+        const cardList = document.getElementById('cardList');
+
+        // Simulate card scanning
+        scanButton.addEventListener('click', function() {
+            // Giả lập quét thẻ - trong thực tế sẽ kết nối với ESP32
+            const mockUID = generateMockUID();
+            cardUIDInput.value = mockUID;
+            showStatus('Đã quét thẻ thành công! UID: ' + mockUID, 'success');
+        });
+
+        // Register new card
+        registerButton.addEventListener('click', async function() {
+            const userName = userNameInput.value.trim();
+            const privatePassword = privatePasswordInput.value.trim();
+            const publicPassword = publicPasswordInput.value.trim();
+            const uid = cardUIDInput.value.trim();
+
+            if (!userName || !privatePassword || !publicPassword || !uid) {
+                showStatus('Vui lòng điền đầy đủ thông tin!', 'error');
+                return;
+            }
+
+            try {
+                registerButton.disabled = true;
+                registerButton.textContent = 'Đang đăng ký...';
+
+                const response = await fetch(`${API_BASE_URL}/api/register-card`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        userName: userName,
+                        privatePassword: privatePassword,
+                        publicPassword: publicPassword,
+                        uid: uid
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showStatus('Đăng ký thẻ thành công!', 'success');
+                    clearForm();
+                    loadCardList();
+                } else {
+                    showStatus(result.error || 'Có lỗi xảy ra khi đăng ký thẻ', 'error');
+                }
+            } catch (error) {
+                showStatus('Lỗi kết nối: ' + error.message, 'error');
+            } finally {
+                registerButton.disabled = false;
+                registerButton.textContent = 'Đăng ký thẻ';
+            }
+        });
+
+        // Generate mock UID for demo
+        function generateMockUID() {
+            const chars = '0123456789ABCDEF';
+            let uid = '';
+            for (let i = 0; i < 8; i++) {
+                uid += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return uid;
+        }
+
+        // Show status message
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('statusMessage');
+            statusDiv.className = `mt-6 p-4 rounded-lg text-center ${
+                type === 'success' 
+                    ? 'bg-green-100 text-green-700 border border-green-200' 
+                    : 'bg-red-100 text-red-700 border border-red-200'
+            }`;
+            statusDiv.textContent = message;
+            statusDiv.classList.remove('hidden');
+
+            setTimeout(() => {
+                statusDiv.classList.add('hidden');
+            }, 5000);
+        }
+
+        // Clear form
+        function clearForm() {
+            userNameInput.value = '';
+            privatePasswordInput.value = '';
+            publicPasswordInput.value = '';
+            cardUIDInput.value = '';
+        }
+
+        // Load card list
+        async function loadCardList() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/get-cards`);
+                const result = await response.json();
+
+                if (response.ok && result.cards) {
+                    displayCardList(result.cards);
+                }
+            } catch (error) {
+                console.error('Error loading cards:', error);
+            }
+        }
+
+        // Display card list
+        function displayCardList(cards) {
+            const cardListDiv = document.getElementById('cardList');
+            
+            if (cards.length === 0) {
+                cardListDiv.innerHTML = '<p class="text-gray-500 text-center">Chưa có thẻ nào được đăng ký</p>';
+                return;
+            }
+
+            cardListDiv.innerHTML = cards.map(card => `
+                <div class="bg-gray-50 p-3 rounded-lg flex justify-between items-center">
+                    <div>
+                        <p class="font-medium text-gray-800">${card.user_name}</p>
+                        <p class="text-sm text-gray-600">UID: ${card.uid}</p>
+                    </div>
+                    <button onclick="deleteCard('${card.id_user}')" 
+                            class="text-red-500 hover:text-red-700 text-sm">
+                        Xóa
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        // Delete card
+        async function deleteCard(userId) {
+            if (!confirm('Bạn có chắc muốn xóa thẻ này?')) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/delete-card/${userId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showStatus('Xóa thẻ thành công!', 'success');
+                    loadCardList();
+                } else {
+                    showStatus('Có lỗi xảy ra khi xóa thẻ', 'error');
+                }
+            } catch (error) {
+                showStatus('Lỗi kết nối: ' + error.message, 'error');
+            }
+        }
+
+        // Load card list on page load
+        window.addEventListener('load', loadCardList);
+    </script>
+</body>
+</html>
