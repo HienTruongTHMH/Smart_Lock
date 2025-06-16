@@ -9,6 +9,8 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Serve static files from public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Import API routes
@@ -18,7 +20,7 @@ const logAccess = require('./api/log-access');
 const registerCard = require('./api/register-card');
 const getCards = require('./api/get-cards');
 
-// API Routes - Sửa lại để sử dụng đúng HTTP methods
+// API Routes
 app.post('/api/check-password', checkPassword);
 app.post('/api/check-uid', checkUID);
 app.post('/api/log-access', logAccess);
@@ -30,6 +32,9 @@ app.delete('/api/delete-card/:id', async (req, res) => {
   const { Pool } = require('pg');
   const pool = new Pool({
     connectionString: process.env.POSTGRES_URL,
+    ssl: {
+      rejectUnauthorized: false
+    }
   });
 
   try {
@@ -40,26 +45,14 @@ app.delete('/api/delete-card/:id', async (req, res) => {
   }
 });
 
-// Test endpoint
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Smart Lock API is running!',
-    timestamp: new Date().toISOString(),
-    endpoints: [
-      'POST /api/check-password',
-      'POST /api/check-uid', 
-      'POST /api/log-access',
-      'POST /api/register-card',
-      'GET /api/get-cards'
-    ]
-  });
-});
-
 // Test database connection endpoint
 app.get('/api/test-db', async (req, res) => {
   const { Pool } = require('pg');
   const pool = new Pool({
     connectionString: process.env.POSTGRES_URL,
+    ssl: {
+      rejectUnauthorized: false
+    }
   });
 
   try {
@@ -81,10 +74,35 @@ app.get('/api/test-db', async (req, res) => {
   }
 });
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Smart Lock API is running!',
+    timestamp: new Date().toISOString(),
+    endpoints: [
+      'GET / - API info',
+      'GET /index.html - Web interface',
+      'GET /api/test-db - Test database',
+      'POST /api/check-password',
+      'POST /api/check-uid', 
+      'POST /api/log-access',
+      'POST /api/register-card',
+      'GET /api/get-cards',
+      'DELETE /api/delete-card/:id'
+    ]
+  });
+});
+
+// Catch-all route for SPA
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📡 API URL: http://localhost:${PORT}`);
   console.log(`🌐 Web interface: http://localhost:${PORT}/index.html`);
+  console.log(`🌐 Or just: http://localhost:${PORT}`);
 });
 
 module.exports = app;
