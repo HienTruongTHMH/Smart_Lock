@@ -4,15 +4,25 @@
     {
       "src": "server.js",
       "use": "@vercel/node"
+    },
+    {
+      "src": "api/**/*.js",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
     {
       "src": "/(.*)",
       "dest": "/server.js"
     }
   ],
-  "env": {
-    "POSTGRES_URL": "@postgres-url"
+  "functions": {
+    "server.js": {
+      "maxDuration": 30
+    }
   }
 }
