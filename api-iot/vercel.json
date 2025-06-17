@@ -6,7 +6,7 @@
       "use": "@vercel/node"
     },
     {
-      "src": "api/**/*.js",
+      "src": "api/*.js",
       "use": "@vercel/node"
     }
   ],
@@ -19,10 +19,5 @@
       "src": "/(.*)",
       "dest": "/server.js"
     }
-  ],
-  "functions": {
-    "server.js": {
-      "maxDuration": 30
-    }
-  }
+  ]
 }

@@ -1,47 +1,66 @@
 const { Pool } = require('pg');
 
-const pool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
-
-module.exports = async (req, res) => {
-  // Set CORS headers
+export default async function handler(req, res) {
+  // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
+    return res.status(200).end();
   }
 
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method Not Allowed" });
-    return;
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const { password } = req.body;
 
   if (!password) {
-    res.status(400).json({ error: "Password required" });
-    return;
+    return res.status(400).json({ error: 'Password required' });
   }
 
+  const pool = new Pool({
+    connectionString: process.env.POSTGRES_URL,
+    ssl: { rejectUnauthorized: false }
+  });
+
   try {
-    const result = await pool.query(
-      'SELECT * FROM management WHERE pwd_private = $1 OR pwd_public = $1',
+    // Check public password first
+    const publicResult = await pool.query(
+      'SELECT * FROM management WHERE pwd_public = $1 LIMIT 1',
       [password]
     );
-    
-    res.json({ 
-      valid: result.rows.length > 0,
-      user: result.rows[0] || null
+
+    if (publicResult.rows.length > 0) {
+      return res.json({ 
+        valid: true, 
+        type: 'public',
+        user: publicResult.rows[0].user_name 
+      });
+    }
+
+    // Check private password
+    const privateResult = await pool.query(
+      'SELECT * FROM management WHERE pwd_private = $1 LIMIT 1',
+      [password]
+    );
+
+    if (privateResult.rows.length > 0) {
+      return res.json({ 
+        valid: true, 
+        type: 'private',
+        user: privateResult.rows[0].user_name 
+      });
+    }
+
+    return res.json({ valid: false });
+
+  } catch (error) {
+    console.error('Database error:', error);
+    return res.status(500).json({ 
+      error: 'Database error', 
+      detail: error.message 
     });
-  } catch (err) {
-    console.error('Database error:', err);
-    res.status(500).json({ error: "Database error", detail: err.message });
   }
-};
+}
