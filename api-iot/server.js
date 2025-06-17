@@ -98,6 +98,93 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Registration mode variables
+let registrationMode = false;
+let pendingRegistration = null;
+
+// API to set registration mode
+app.post('/api/set-registration-mode', (req, res) => {
+  const { mode, userData } = req.body;
+  registrationMode = mode;
+  
+  if (mode) {
+    pendingRegistration = userData;
+    console.log('Registration mode activated for:', userData);
+  } else {
+    pendingRegistration = null;
+    console.log('Registration mode deactivated');
+  }
+  
+  res.json({ success: true, registrationMode: mode });
+});
+
+// API to check registration mode
+app.get('/api/register-mode', (req, res) => {
+  res.json({ registrationMode: registrationMode });
+});
+
+// API to receive UID from ESP32
+app.post('/api/send-uid', async (req, res) => {
+  if (!registrationMode || !pendingRegistration) {
+    res.status(400).json({ success: false, message: 'Not in registration mode' });
+    return;
+  }
+  
+  const { uid } = req.body;
+  
+  if (!uid) {
+    res.status(400).json({ success: false, message: 'UID required' });
+    return;
+  }
+  
+  try {
+    const { Pool } = require('pg');
+    const pool = new Pool({
+      connectionString: process.env.POSTGRES_URL,
+      ssl: { rejectUnauthorized: false }
+    });
+    
+    // Check if UID already exists
+    const existingCard = await pool.query(
+      'SELECT * FROM management WHERE uid = $1',
+      [uid]
+    );
+    
+    if (existingCard.rows.length > 0) {
+      res.json({ success: false, message: 'UID already exists' });
+      return;
+    }
+    
+    // Insert new card with pendingRegistration info
+    const result = await pool.query(
+      'INSERT INTO management (user_name, pwd_private, pwd_public, uid) VALUES ($1, $2, $3, $4) RETURNING *',
+      [
+        pendingRegistration.userName,
+        pendingRegistration.privatePassword,
+        pendingRegistration.publicPassword,
+        uid
+      ]
+    );
+    
+    // Disable registration mode
+    registrationMode = false;
+    pendingRegistration = null;
+    
+    res.json({ 
+      success: true, 
+      message: 'Card registered successfully',
+      card: result.rows[0]
+    });
+    
+  } catch (err) {
+    res.status(500).json({ 
+      success: false, 
+      message: 'Database error', 
+      detail: err.message 
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📡 API URL: http://localhost:${PORT}`);

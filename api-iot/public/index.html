@@ -48,11 +48,12 @@
                 <input type="password" id="publicPassword" placeholder="Mật khẩu chung" 
                        class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
                 
+                <!-- Scan Real Card -->
                 <div class="flex gap-2">
-                    <input type="text" id="cardUID" placeholder="UID thẻ" readonly
-                           class="flex-1 px-4 py-2 border rounded-lg bg-gray-50">
-                    <button id="generateUID" class="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600">
-                        Gen UID
+                    <input type="text" id="cardUID" placeholder="UID sẽ được quét từ thẻ" readonly
+                           class="flex-1 px-3 py-2 border rounded-lg bg-gray-50 text-sm">
+                    <button id="scanRealCard" class="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm">
+                        Quét Thẻ
                     </button>
                 </div>
                 
@@ -101,46 +102,108 @@
             }
         });
 
-        // Generate UID
-        document.getElementById('generateUID').addEventListener('click', () => {
-            const uid = Array.from({length: 8}, () => Math.floor(Math.random() * 16).toString(16).toUpperCase()).join('');
-            document.getElementById('cardUID').value = uid;
-        });
-
         // Register Card
         document.getElementById('registerCard').addEventListener('click', async () => {
-            const userName = document.getElementById('userName').value;
-            const privatePassword = document.getElementById('privatePassword').value;
-            const publicPassword = document.getElementById('publicPassword').value;
-            const uid = document.getElementById('cardUID').value;
+            const userName = document.getElementById('userName').value.trim();
+            const privatePassword = document.getElementById('privatePassword').value.trim();
+            const publicPassword = document.getElementById('publicPassword').value.trim();
 
-            if (!userName || !privatePassword || !publicPassword || !uid) {
-                alert('Vui lòng điền đầy đủ thông tin!');
+            if (!userName || !privatePassword || !publicPassword) {
+                showResult({ error: 'Vui lòng điền đầy đủ thông tin và quét thẻ!' }, 'error');
+                return;
+            }
+
+            showResult({ 
+                message: 'Vui lòng sử dụng nút "Quét Thẻ" để đăng ký thẻ RFID thực tế!'
+            }, 'info');
+        });
+
+        // Scan Real Card
+        document.getElementById('scanRealCard').addEventListener('click', async () => {
+            const userName = document.getElementById('userName').value.trim();
+            const privatePassword = document.getElementById('privatePassword').value.trim();
+            const publicPassword = document.getElementById('publicPassword').value.trim();
+
+            if (!userName || !privatePassword || !publicPassword) {
+                showResult({ error: 'Vui lòng điền đầy đủ thông tin trước khi quét thẻ!' }, 'error');
                 return;
             }
 
             try {
-                const response = await fetch(API_BASE + '/api/register-card', {
+                // Bật chế độ đăng ký
+                const response = await fetch(API_BASE + '/api/set-registration-mode', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ userName, privatePassword, publicPassword, uid })
+                    body: JSON.stringify({ 
+                        mode: true, 
+                        userData: { userName, privatePassword, publicPassword }
+                    })
                 });
-                
-                const data = await response.json();
-                showResult(data);
-                
+
                 if (response.ok) {
-                    // Clear form
-                    document.getElementById('userName').value = '';
-                    document.getElementById('privatePassword').value = '';
-                    document.getElementById('publicPassword').value = '';
-                    document.getElementById('cardUID').value = '';
-                    loadCards();
+                    document.getElementById('cardUID').placeholder = 'Đang chờ quét thẻ...';
+                    document.getElementById('scanRealCard').textContent = 'Đang chờ...';
+                    document.getElementById('scanRealCard').disabled = true;
+                    
+                    showResult({ 
+                        message: 'Chế độ quét thẻ đã được kích hoạt!',
+                        instruction: 'Hãy đưa thẻ vào đầu đọc RFID trong vòng 30 giây.'
+                    }, 'info');
+
+                    // Kiểm tra kết quả đăng ký
+                    checkRegistrationResult();
                 }
             } catch (error) {
-                showResult({ error: error.message });
+                showResult({ error: 'Lỗi kích hoạt chế độ quét thẻ: ' + error.message }, 'error');
             }
         });
+
+        async function checkRegistrationResult() {
+            const maxAttempts = 15; // 30 giây / 2 giây = 15 lần
+            let attempts = 0;
+
+            const checkInterval = setInterval(async () => {
+                attempts++;
+                
+                try {
+                    const response = await fetch(API_BASE + '/api/register-mode');
+                    const data = await response.json();
+                    
+                    if (!data.registrationMode || attempts >= maxAttempts) {
+                        // Quá trình đăng ký hoàn tất hoặc timeout
+                        clearInterval(checkInterval);
+                        
+                        document.getElementById('cardUID').placeholder = 'UID thẻ';
+                        document.getElementById('scanRealCard').textContent = 'Quét Thẻ';
+                        document.getElementById('scanRealCard').disabled = false;
+                        
+                        if (!data.registrationMode && attempts < maxAttempts) {
+                            // Đăng ký thành công
+                            showResult({ message: 'Đăng ký thẻ thành công!' }, 'success');
+                            
+                            // Clear form
+                            document.getElementById('userName').value = '';
+                            document.getElementById('privatePassword').value = '';
+                            document.getElementById('publicPassword').value = '';
+                            
+                            loadCards();
+                        } else {
+                            // Timeout
+                            showResult({ error: 'Hết thời gian chờ. Vui lòng thử lại.' }, 'error');
+                            
+                            // Tắt chế độ đăng ký
+                            fetch(API_BASE + '/api/set-registration-mode', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ mode: false })
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error checking registration:', error);
+                }
+            }, 2000); // Kiểm tra mỗi 2 giây
+        }
 
         // Load Cards
         async function loadCards() {
