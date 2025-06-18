@@ -26,31 +26,31 @@ export default async function handler(req, res) {
   });
 
   try {
-    // Check public password first
+    // Check public password
     const publicResult = await pool.query(
-      'SELECT * FROM management WHERE pwd_public = $1 LIMIT 1',
+      'SELECT * FROM "Manager_Sign_in" WHERE public_pwd = $1 LIMIT 1',
       [password]
     );
 
     if (publicResult.rows.length > 0) {
-      return res.json({ 
-        valid: true, 
+      return res.json({
+        valid: true,
         type: 'public',
-        user: publicResult.rows[0].user_name 
+        user: publicResult.rows[0].full_name
       });
     }
 
     // Check private password
     const privateResult = await pool.query(
-      'SELECT * FROM management WHERE pwd_private = $1 LIMIT 1',
+      'SELECT * FROM "Manager_Sign_in" WHERE private_pwd = $1 LIMIT 1',
       [password]
     );
 
     if (privateResult.rows.length > 0) {
-      return res.json({ 
-        valid: true, 
+      return res.json({
+        valid: true,
         type: 'private',
-        user: privateResult.rows[0].user_name 
+        user: privateResult.rows[0].full_name
       });
     }
 
@@ -58,9 +58,11 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('Database error:', error);
-    return res.status(500).json({ 
-      error: 'Database error', 
-      detail: error.message 
+    return res.status(500).json({
+      error: 'Database error',
+      detail: error.message
     });
+  } finally {
+    await pool.end();
   }
 }

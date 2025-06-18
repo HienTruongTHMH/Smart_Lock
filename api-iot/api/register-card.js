@@ -1,46 +1,55 @@
 const { Pool } = require('pg');
 
-const pool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
-});
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-module.exports = async (req, res) => {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method Not Allowed" });
-    return;
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
   }
 
-  const { userName, privatePassword, publicPassword, uid } = req.body;
-
-  if (!userName || !privatePassword || !publicPassword || !uid) {
-    res.status(400).json({ error: "All fields are required" });
-    return;
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  const { fullName, privatePassword, publicPassword, uid } = req.body;
+
+  if (!fullName || !privatePassword || !publicPassword || !uid) {
+    return res.status(400).json({ error: 'All fields are required' });
+  }
+
+  const pool = new Pool({
+    connectionString: process.env.POSTGRES_URL,
+    ssl: { rejectUnauthorized: false }
+  });
 
   try {
-    // Kiểm tra xem UID đã tồn tại chưa
-    const existingCard = await pool.query(
-      'SELECT * FROM management WHERE uid = $1',
+    // Check if UID already exists
+    const existing = await pool.query(
+      'SELECT * FROM "Manager_Sign_in" WHERE "UID" = $1',
       [uid]
     );
 
-    if (existingCard.rows.length > 0) {
-      res.status(400).json({ error: "UID already exists" });
-      return;
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: 'UID already exists' });
     }
 
-    // Thêm thẻ mới
+    // Insert new card
     const result = await pool.query(
-      'INSERT INTO management (user_name, pwd_private, pwd_public, uid) VALUES ($1, $2, $3, $4) RETURNING *',
-      [userName, privatePassword, publicPassword, uid]
+      'INSERT INTO "Manager_Sign_in" ("Full_Name", private_pwd, public_pwd, "UID") VALUES ($1, $2, $3, $4) RETURNING *',
+      [fullName, privatePassword, publicPassword, uid]
     );
 
-    res.json({ 
-      success: true, 
-      message: "Card registered successfully",
+    return res.json({
+      success: true,
+      message: 'Card registered successfully',
       card: result.rows[0]
     });
+
   } catch (err) {
-    res.status(500).json({ error: "Database error", detail: err.message });
+    return res.status(500).json({ error: 'Database error', detail: err.message });
+  } finally {
+    await pool.end();
   }
-};
+}

@@ -9,11 +9,11 @@
 #include <time.h>  // Thêm thư viện time
 
 // WiFi credentials
-const char* ssid = "ZONE FOURT";
-const char* password_wifi = "12345678";
+const char* ssid = "Minh Hien";
+const char* password_wifi = "0935515102";
 
 // API endpoints - Cập nhật URL của bạn
-const char* api_base_url = "http://localhost:3000"; // Hoặc URL Vercel của bạn
+const char* api_base_url = "https://api-bgjq7jh5d-hiens-projects-d1689d2e.vercel.app"; // Hoặc URL Vercel của bạn
 const char* check_password_endpoint = "/api/check-password";
 const char* check_uid_endpoint = "/api/check-uid";
 const char* log_access_endpoint = "/api/log-access";
@@ -227,6 +227,33 @@ bool checkUID(byte *uid) {
     if (uid[i] != validUID[i]) return false;
   }
   return true;
+}
+
+bool registerCardAPI(String userName, String privatePassword, String publicPassword, String uid) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  HTTPClient http;
+  http.begin(String(api_base_url) + "/api/register-card");
+  http.addHeader("Content-Type", "application/json");
+
+  DynamicJsonDocument doc(1024);
+  doc["userName"] = userName;
+  doc["privatePassword"] = privatePassword;
+  doc["publicPassword"] = publicPassword;
+  doc["uid"] = uid;
+  String jsonString;
+  serializeJson(doc, jsonString);
+
+  int httpResponseCode = http.POST(jsonString);
+  if (httpResponseCode == 200) {
+    String response = http.getString();
+    Serial.println("Register response: " + response);
+    http.end();
+    return true;
+  } else {
+    Serial.println("Register failed: " + String(httpResponseCode));
+    http.end();
+    return false;
+  }
 }
 
 void setup() {

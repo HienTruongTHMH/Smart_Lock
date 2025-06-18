@@ -1,29 +1,47 @@
 const { Pool } = require('pg');
 
-const pool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
-});
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-module.exports = async (req, res) => {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method Not Allowed" });
-    return;
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const { uid } = req.body;
 
   if (!uid) {
-    res.status(400).json({ error: "UID required" });
-    return;
+    return res.status(400).json({ error: 'UID required' });
   }
+
+  const pool = new Pool({
+    connectionString: process.env.POSTGRES_URL,
+    ssl: { rejectUnauthorized: false }
+  });
 
   try {
     const result = await pool.query(
-      'SELECT * FROM management WHERE uid = $1',
+      'SELECT * FROM "Manager_Sign_in" WHERE UPPER("UID") = UPPER($1)',
       [uid]
     );
-    res.json({ valid: result.rows.length > 0, user: result.rows[0] });
-  } catch (err) {
-    res.status(500).json({ error: "Database error", detail: err.message });
+
+    return res.json({
+      valid: result.rows.length > 0,
+      user: result.rows[0] || null
+    });
+
+  } catch (error) {
+    console.error('Database error:', error);
+    return res.status(500).json({
+      error: 'Database error',
+      detail: error.message
+    });
+  } finally {
+    await pool.end();
   }
-};
+}
