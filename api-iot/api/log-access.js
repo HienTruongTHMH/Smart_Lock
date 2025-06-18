@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -28,12 +29,32 @@ export default async function handler(req, res) {
     let userId = null;
     
     if (method === 'password') {
-      const userResult = await pool.query(
-        'SELECT id_user FROM "Manager_Sign_In" WHERE private_pwd = $1 OR public_pwd = $1',
+      // Trước tiên check local password (plaintext)
+      const localPasswordResult = await pool.query(
+        'SELECT id_user FROM "Manager_Sign_In" WHERE private_pwd = $1',
         [identifier]
       );
-      if (userResult.rows.length > 0) {
-        userId = userResult.rows[0].id_user;
+      
+      if (localPasswordResult.rows.length > 0) {
+        userId = localPasswordResult.rows[0].id_user;
+      } else {
+        // Nếu không match plaintext, check hashed passwords
+        const allUsers = await pool.query(
+          'SELECT id_user, private_pwd FROM "Manager_Sign_In"'
+        );
+        
+        for (let user of allUsers.rows) {
+          try {
+            const isMatch = await bcrypt.compare(identifier, user.private_pwd);
+            if (isMatch) {
+              userId = user.id_user;
+              break;
+            }
+          } catch (bcryptError) {
+            // Ignore bcrypt errors for non-hashed passwords
+            continue;
+          }
+        }
       }
     } else if (method === 'rfid') {
       const userResult = await pool.query(
@@ -46,15 +67,16 @@ export default async function handler(req, res) {
     }
 
     if (userId && success) {
-      // Log vào bảng time_tracking (nếu bảng này tồn tại)
+      // Sửa theo đúng cấu trúc bảng Time_Tracking
       await pool.query(
-        'INSERT INTO time_tracking (id_user, timestamp, method, status) VALUES ($1, $2, $3, $4)',
-        [userId, new Date(timestamp * 1000), method, 'ĐÃ vào']
+        'INSERT INTO "Time_Tracking" (id, "Time_Tracking", "Method", "Status") VALUES ($1, $2, $3, $4)',
+        [userId, new Date(timestamp * 1000), method, true]
       );
     }
 
     return res.json({ success: true, logged: userId ? true : false });
   } catch (err) {
+    console.error('Database error:', err);
     return res.status(500).json({ error: 'Database error', detail: err.message });
   } finally {
     await pool.end();

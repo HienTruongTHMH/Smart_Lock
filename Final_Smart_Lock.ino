@@ -6,21 +6,21 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <time.h>  // Thêm thư viện time
+#include <time.h>
 
 // WiFi credentials
 const char* ssid = "MHEPro";
 const char* password_wifi = "0934752432";
 
-// API endpoints - Cập nhật URL của bạn
-const char* api_base_url = "https://api-8sh8dem5x-hiens-projects-d1689d2e.vercel.app"; // Hoặc URL Vercel của bạn
+// API endpoints
+const char* api_base_url = "https://api-ni7pgh09n-hiens-projects-d1689d2e.vercel.app";
 const char* check_password_endpoint = "/api/check-password";
 const char* check_uid_endpoint = "/api/check-uid";
 const char* log_access_endpoint = "/api/log-access";
 
 // NTP Server
 const char* ntpServer = "pool.ntp.org";
-const long gmtOffset_sec = 25200; // GMT+7 (Vietnam) = 7*3600
+const long gmtOffset_sec = 25200;
 const int daylightOffset_sec = 0;
 
 // LCD setup
@@ -46,6 +46,7 @@ Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 // Password
 String password = "1234";
 String input_pass = "";
+bool inputStarted = false; // Để track xem đã bắt đầu nhập chưa
 
 // RFID setup
 #define SS_PIN 5
@@ -53,12 +54,17 @@ String input_pass = "";
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 byte validUID[4] = {0x67, 0xA2, 0x14, 0x05};
 
-// Thêm vào phần global variables
+// Registration mode variables
 bool registrationMode = false;
-String pendingUserName = "";
+String registrationStep = "waiting"; // waiting, password_input, password_set, scanning
 String pendingPassword = "";
 unsigned long lastModeCheck = 0;
-const unsigned long MODE_CHECK_INTERVAL = 3000; // Check every 3 seconds
+const unsigned long MODE_CHECK_INTERVAL = 3000;
+
+// Thêm variables để debounce
+unsigned long lastKeyTime = 0;
+const unsigned long KEY_DEBOUNCE_DELAY = 200; // 200ms debounce
+char lastKey = 0;
 
 void connectWiFi() {
   WiFi.begin(ssid, password_wifi);
@@ -77,7 +83,6 @@ void connectWiFi() {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
   
-  // Cấu hình NTP
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
   
   lcd.clear();
@@ -86,7 +91,7 @@ void connectWiFi() {
   delay(2000);
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Nhap mat khau:");
+  lcd.print("Smart Lock Ready");
 }
 
 unsigned long getCurrentTimestamp() {
@@ -94,7 +99,7 @@ unsigned long getCurrentTimestamp() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
     Serial.println("Failed to obtain time");
-    return millis() / 1000; // Fallback to millis
+    return millis() / 1000;
   }
   time(&now);
   return now;
@@ -109,7 +114,7 @@ bool checkPasswordAPI(String pass) {
   HTTPClient http;
   http.begin(String(api_base_url) + check_password_endpoint);
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(10000); // 10 second timeout
+  http.setTimeout(10000);
   
   DynamicJsonDocument doc(1024);
   doc["password"] = pass;
@@ -150,7 +155,7 @@ bool checkUIDAPI(String uid) {
   http.setTimeout(10000);
   
   DynamicJsonDocument doc(1024);
-  doc["uid"] = uid;  // Trực tiếp dùng String
+  doc["uid"] = uid;
   
   String jsonString;
   serializeJson(doc, jsonString);
@@ -192,7 +197,7 @@ void logAccess(String method, String identifier, bool success) {
   doc["method"] = method;
   doc["identifier"] = identifier;
   doc["success"] = success;
-  doc["timestamp"] = getCurrentTimestamp(); // Sử dụng hàm mới
+  doc["timestamp"] = getCurrentTimestamp();
   
   String jsonString;
   serializeJson(doc, jsonString);
@@ -221,44 +226,10 @@ void openLock() {
   myServo.write(0);
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Nhap mat khau:");
+  lcd.print("Smart Lock Ready");
+  inputStarted = false; // Reset input state
 }
 
-bool checkUID(byte *uid) {
-  for (int i = 0; i < 4; i++) {
-    if (uid[i] != validUID[i]) return false;
-  }
-  return true;
-}
-
-bool registerCardAPI(String userName, String privatePassword, String publicPassword, String uid) {
-  if (WiFi.status() != WL_CONNECTED) return false;
-  HTTPClient http;
-  http.begin(String(api_base_url) + "/api/register-card");
-  http.addHeader("Content-Type", "application/json");
-
-  DynamicJsonDocument doc(1024);
-  doc["userName"] = userName;
-  doc["privatePassword"] = privatePassword;
-  doc["publicPassword"] = publicPassword;
-  doc["uid"] = uid;
-  String jsonString;
-  serializeJson(doc, jsonString);
-
-  int httpResponseCode = http.POST(jsonString);
-  if (httpResponseCode == 200) {
-    String response = http.getString();
-    Serial.println("Register response: " + response);
-    http.end();
-    return true;
-  } else {
-    Serial.println("Register failed: " + String(httpResponseCode));
-    http.end();
-    return false;
-  }
-}
-
-// Thêm hàm check registration mode
 bool checkRegistrationMode() {
   if (WiFi.status() != WL_CONNECTED) return false;
   
@@ -271,8 +242,20 @@ bool checkRegistrationMode() {
     
     // Parse JSON response
     if (response.indexOf("\"isActive\":true") > -1) {
-      if (response.indexOf("\"step\":\"scanning\"") > -1) {
+      if (response.indexOf("\"step\":\"password_input\"") > -1) {
         registrationMode = true;
+        registrationStep = "password_input";
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("CHE DO DANG KY");
+        lcd.setCursor(0, 1);
+        lcd.print("Nhap mat khau:");
+        inputStarted = false;
+        input_pass = "";
+        return true;
+      } else if (response.indexOf("\"step\":\"password_set\"") > -1) {
+        registrationMode = true;
+        registrationStep = "password_set";
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print("CHE DO DANG KY");
@@ -284,11 +267,12 @@ bool checkRegistrationMode() {
       if (registrationMode) {
         // Exit registration mode
         registrationMode = false;
+        registrationStep = "waiting";
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print("Smart Lock");
-        lcd.setCursor(0, 1);
-        lcd.print("San sang...");
+        lcd.print("Smart Lock Ready");
+        inputStarted = false;
+        input_pass = "";
       }
     }
   }
@@ -297,7 +281,30 @@ bool checkRegistrationMode() {
   return registrationMode;
 }
 
-// Hàm send UID khi scan được thẻ mới
+bool sendPasswordToAPI(String password) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  
+  HTTPClient http;
+  http.begin(String(api_base_url) + "/api/set-registration-mode");
+  http.addHeader("Content-Type", "application/json");
+
+  String jsonData = "{\"action\":\"set_password\",\"password\":\"" + password + "\"}";
+  int httpResponseCode = http.POST(jsonData);
+  
+  if (httpResponseCode == 200) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Mat khau da luu!");
+    lcd.setCursor(0, 1);
+    lcd.print("Quet the moi...");
+    http.end();
+    return true;
+  }
+  
+  http.end();
+  return false;
+}
+
 bool sendScannedUID(String uid) {
   if (WiFi.status() != WL_CONNECTED) return false;
   
@@ -343,7 +350,7 @@ void setup() {
   Serial.println("Setup complete!");
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Nhap mat khau:");
+  lcd.print("Smart Lock Ready");
 
   // Test API connection on startup
   Serial.println("Testing API connection...");
@@ -362,59 +369,157 @@ void loop() {
   }
 
   char key = keypad.getKey();
-  if (key) {
-    Serial.println("Key pressed: " + String(key));
+  
+  // Thêm debounce và validation
+  if (key && key != lastKey && (millis() - lastKeyTime > KEY_DEBOUNCE_DELAY)) {
+    Serial.println("Valid key pressed: " + String(key));
+    lastKey = key;
+    lastKeyTime = millis();
     
-    if (key == '#') {
-      bool isValidPassword = false;
-      
-      Serial.println("Checking password: " + input_pass);
-      
-      // Kiểm tra password local trước
-      if (input_pass == password) {
-        Serial.println("Local password match");
-        isValidPassword = true;
-      } else {
-        // Kiểm tra password qua API
-        Serial.println("Checking via API...");
-        isValidPassword = checkPasswordAPI(input_pass);
-      }
-      
-      if (isValidPassword) {
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Dung mat khau!");
-        Serial.println("Password correct!");
-        logAccess("password", input_pass, true);
-        openLock();
-      } else {
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Sai mat khau!");
-        Serial.println("Password incorrect!");
-        logAccess("password", input_pass, false);
-        delay(2000);
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Nhap mat khau:");
-      }
-      input_pass = "";
-    } else if (key == '*') {
-      input_pass = "";
+    // Nếu đang ở chế độ đăng ký và cần nhập password
+    if (registrationMode && registrationStep == "password_input") {
+      handleRegistrationPasswordInput(key);
+    }
+    // Chế độ bình thường
+    else if (!registrationMode) {
+      handleNormalModeInput(key);
+    }
+  }
+  
+  // Reset lastKey sau 1 giây để cho phép nhấn lại
+  if (millis() - lastKeyTime > 1000) {
+    lastKey = 0;
+  }
+
+  // RFID scanning logic (giữ nguyên)
+  handleRFIDScan();
+}
+
+// Tách riêng function xử lý password trong chế độ đăng ký:
+void handleRegistrationPasswordInput(char key) {
+  if (key == '*') {
+    input_pass = "";
+    inputStarted = false;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("CHE DO DANG KY");
+    lcd.setCursor(0, 1);
+    lcd.print("Nhap mat khau:");
+    Serial.println("Registration password cleared");
+  } 
+  else if (key >= '0' && key <= '9') {
+    if (!inputStarted) {
+      inputStarted = true;
       lcd.clear();
       lcd.setCursor(0, 0);
-      lcd.print("Nhap mat khau:");
-      Serial.println("Password cleared");
-    } else {
-      if (input_pass.length() < 4) {
-        input_pass += key;
-        lcd.setCursor(0, 1);
-        lcd.print(input_pass);
+      lcd.print("Mat khau la:");
+      lcd.setCursor(0, 1);
+    }
+    
+    if (input_pass.length() < 4) {
+      input_pass += key;
+      lcd.setCursor(input_pass.length() - 1, 1);
+      lcd.print("*");
+      
+      Serial.println("Password length: " + String(input_pass.length()));
+      
+      // Tự động xác nhận khi đủ 4 số
+      if (input_pass.length() == 4) {
+        Serial.println("Registration password complete: " + input_pass);
+        if (sendPasswordToAPI(input_pass)) {
+          pendingPassword = input_pass;
+          registrationStep = "password_set";
+        }
+        input_pass = "";
+        inputStarted = false;
       }
     }
   }
+  else {
+    Serial.println("Invalid key for password: " + String(key));
+  }
+}
 
-  // RFID scanning logic
+// Tách riêng function xử lý input ở chế độ bình thường:
+void handleNormalModeInput(char key) {
+  // if (key == 'A') {
+  //   testServoManual();
+  //   return;
+  // }
+  
+  if (key == '*') {
+    input_pass = "";
+    inputStarted = false;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Smart Lock Ready");
+    Serial.println("Password cleared");
+  } 
+  else if (key >= '0' && key <= '9') {
+    if (!inputStarted) {
+      inputStarted = true;
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Mat khau la:");
+      lcd.setCursor(0, 1);
+    }
+    
+    if (input_pass.length() < 4) {
+      input_pass += key;
+      lcd.setCursor(input_pass.length() - 1, 1);
+      lcd.print("*");
+      
+      // Tự động xác nhận khi đủ 4 số
+      if (input_pass.length() == 4) {
+        checkPasswordAndOpenLock();
+      }
+    }
+  }
+  else {
+    Serial.println("Invalid key: " + String(key));
+  }
+}
+
+// Tách riêng function check password:
+void checkPasswordAndOpenLock() {
+  bool isValidPassword = false;
+  
+  Serial.println("Checking password: " + input_pass);
+  
+  // Kiểm tra password local trước
+  if (input_pass == password) {
+    Serial.println("Local password match");
+    isValidPassword = true;
+  } else {
+    // Kiểm tra password qua API
+    Serial.println("Checking via API...");
+    isValidPassword = checkPasswordAPI(input_pass);
+  }
+  
+  if (isValidPassword) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Dung mat khau!");
+    Serial.println("Password correct!");
+    logAccess("password", input_pass, true);
+    openLock();
+  } else {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Sai mat khau!");
+    Serial.println("Password incorrect!");
+    logAccess("password", input_pass, false);
+    delay(2000);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Smart Lock Ready");
+  }
+  input_pass = "";
+  inputStarted = false;
+}
+
+// Tách riêng RFID handling:
+void handleRFIDScan() {
   if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
     String uid = "";
     for (byte i = 0; i < mfrc522.uid.size; i++) {
@@ -422,15 +527,13 @@ void loop() {
     }
     uid.toUpperCase();
 
-    if (registrationMode) {
+    if (registrationMode && registrationStep == "password_set") {
       // Registration mode - send UID to web
       if (sendScannedUID(uid)) {
         // Wait for registration completion
         delay(2000);
-        // Check if registration completed
-        // (Web sẽ tự động complete sau khi đăng ký thành công)
       }
-    } else {
+    } else if (!registrationMode) {
       // Normal mode - check UID
       if (checkUIDAPI(uid)) {
         lcd.clear();
@@ -438,17 +541,17 @@ void loop() {
         lcd.print("The hop le!");
         lcd.setCursor(0, 1);
         lcd.print("Mo cua...");
-        openLock();  // Sửa từ openDoor() thành openLock()
+        logAccess("rfid", uid, true);
+        openLock();
       } else {
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print("The khong hop le");
+        logAccess("rfid", uid, false);
         delay(2000);
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print("Smart Lock");
-        lcd.setCursor(0, 1);
-        lcd.print("San sang...");
+        lcd.print("Smart Lock Ready");
       }
     }
 

@@ -45,31 +45,57 @@
                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                                placeholder="Nhập họ và tên">
                     </div>
-                    
+
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Mật khẩu riêng:</label>
-                        <input type="password" id="privatePassword" 
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Mật khẩu (4 số):</label>
+                        <input type="password" id="privatePassword" maxlength="4" 
                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                               placeholder="Nhập mật khẩu riêng">
+                               placeholder="Nhập 4 số mật khẩu">
                     </div>
 
-                    <div class="bg-yellow-50 p-4 rounded-lg">
-                        <p class="text-sm text-yellow-800 mb-3">
-                            <strong>Bước tiếp theo:</strong> Quét thẻ RFID trên thiết bị
+                    <!-- Thêm phần UID optional -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            UID thẻ RFID <span class="text-gray-500">(tùy chọn)</span>:
+                        </label>
+                        <input type="text" id="cardUID" 
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                               placeholder="Để trống nếu chưa có thẻ">
+                        <p class="text-xs text-gray-500 mt-1">
+                            Có thể để trống và bổ sung thẻ RFID sau
                         </p>
-                        <button onclick="startRegistration()" 
-                                class="w-full bg-yellow-600 text-white py-2 px-4 rounded-lg hover:bg-yellow-700 transition-colors">
-                            🔍 Bắt đầu quét thẻ
+                    </div>
+
+                    <!-- 2 lựa chọn đăng ký -->
+                    <div class="space-y-3">
+                        <button onclick="registerUserDirectly()" 
+                                class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors">
+                            🚀 Đăng ký ngay
                         </button>
+                        
+                        <div class="text-center text-gray-500">hoặc</div>
+                        
+                        <button onclick="startRegistrationWithKeypad()" 
+                                class="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors">
+                            🎛️ Đăng ký bằng KeyPad ESP32
+                        </button>
+                    </div>
+
+                    <div class="bg-blue-50 p-4 rounded-lg">
+                        <p class="text-sm text-blue-800">
+                            <strong>💡 Lưu ý:</strong><br>
+                            • Đăng ký ngay: Nhập đầy đủ thông tin trên web<br>
+                            • Đăng ký bằng KeyPad: Nhập mật khẩu trên ESP32 và quét thẻ
+                        </p>
                     </div>
                 </div>
 
                 <!-- Registration Status -->
                 <div id="registrationStatus" class="mt-6 hidden">
-                    <div class="bg-blue-50 p-4 rounded-lg">
+                    <div class="bg-green-50 p-4 rounded-lg">
                         <div class="text-center">
-                            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3"></div>
-                            <p class="text-blue-800 font-medium" id="statusMessage">Đang chờ quét thẻ...</p>
+                            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-3"></div>
+                            <p class="text-green-800 font-medium" id="statusMessage">Đang chờ nhập mật khẩu trên KeyPad...</p>
                         </div>
                     </div>
                 </div>
@@ -134,27 +160,26 @@
 
         async function startRegistration() {
             const fullName = document.getElementById('fullName').value.trim();
-            const privatePassword = document.getElementById('privatePassword').value.trim();
 
-            if (!fullName || !privatePassword) {
-                alert('Vui lòng nhập đầy đủ thông tin!');
+            if (!fullName) {
+                alert('Vui lòng nhập họ và tên!');
                 return;
             }
 
             try {
-                // Start registration mode
+                // Start registration mode (không cần privatePassword nữa)
                 const response = await fetch(API_BASE + '/api/set-registration-mode', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         action: 'start',
-                        userData: { fullName, privatePassword }
+                        userData: { fullName }
                     })
                 });
 
                 if (response.ok) {
                     document.getElementById('registrationStatus').classList.remove('hidden');
-                    document.getElementById('statusMessage').textContent = 'Đang chờ quét thẻ trên thiết bị...';
+                    document.getElementById('statusMessage').textContent = 'Đang chờ nhập mật khẩu trên KeyPad ESP32...';
                     
                     // Poll for registration status
                     registrationTimer = setInterval(checkRegistrationStatus, 2000);
@@ -172,14 +197,15 @@
                 const response = await fetch(API_BASE + '/api/set-registration-mode');
                 const data = await response.json();
 
-                if (data.step === 'processing' && data.scannedUID) {
+                if (data.step === 'password_set') {
+                    document.getElementById('statusMessage').textContent = 'Đã nhận mật khẩu! Vui lòng quét thẻ RFID...';
+                } else if (data.step === 'processing' && data.scannedUID) {
                     // UID has been scanned, now register
                     document.getElementById('statusMessage').textContent = 'Đã quét thẻ! Đang xử lý...';
                     
                     const fullName = document.getElementById('fullName').value.trim();
-                    const privatePassword = document.getElementById('privatePassword').value.trim();
                     
-                    await registerUser(fullName, privatePassword, data.scannedUID);
+                    await registerUser(fullName, data.privatePassword, data.scannedUID);
                 } else if (data.step === 'completed') {
                     clearInterval(registrationTimer);
                     document.getElementById('statusMessage').textContent = '✅ Đăng ký thành công!';
@@ -188,7 +214,6 @@
                         showMainMenu();
                         document.getElementById('registrationStatus').classList.add('hidden');
                         document.getElementById('fullName').value = '';
-                        document.getElementById('privatePassword').value = '';
                     }, 2000);
                 }
             } catch (error) {
@@ -243,8 +268,23 @@
                         <div class="space-y-2">
                             ${data.cards.map(card => `
                                 <div class="bg-gray-50 p-3 rounded-lg">
-                                    <div class="font-medium">${card.Full_Name}</div>
-                                    <div class="text-sm text-gray-600">UID: ${card.UID}</div>
+                                    <div class="flex justify-between items-start">
+                                        <div>
+                                            <div class="font-medium">${card.Full_Name}</div>
+                                            <div class="text-sm text-gray-600">
+                                                ${card.UID 
+                                                    ? `🎫 Thẻ: ${card.UID}` 
+                                                    : `📝 Chưa có thẻ RFID`
+                                                }
+                                            </div>
+                                        </div>
+                                        ${!card.UID ? `
+                                            <button onclick="addCard(${card.id_user}, '${card.Full_Name}')" 
+                                                    class="text-blue-600 hover:text-blue-800 text-sm">
+                                                + Thêm thẻ
+                                            </button>
+                                        ` : ''}
+                                    </div>
                                 </div>
                             `).join('')}
                         </div>
@@ -281,6 +321,122 @@
                 `;
             } catch (error) {
                 document.getElementById('statusContent').innerHTML = '<p class="text-red-600">Lỗi kiểm tra trạng thái!</p>';
+            }
+        }
+
+        // Thêm function đăng ký trực tiếp
+        async function registerUserDirectly() {
+            const fullName = document.getElementById('fullName').value.trim();
+            const privatePassword = document.getElementById('privatePassword').value.trim();
+            const cardUID = document.getElementById('cardUID').value.trim(); // Có thể rỗng
+
+            if (!fullName) {
+                alert('Vui lòng nhập họ và tên!');
+                return;
+            }
+
+            if (!privatePassword || privatePassword.length !== 4) {
+                alert('Vui lòng nhập mật khẩu 4 số!');
+                return;
+            }
+
+            try {
+                const response = await fetch(API_BASE + '/api/register-card', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        fullName,
+                        privatePassword,
+                        uid: cardUID || null, // Gửi null nếu rỗng
+                        source: 'web_direct'
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    const message = data.user.hasRFID 
+                        ? `✅ Đăng ký thành công!\n🎫 Thẻ: ${data.user.uid}`
+                        : `✅ Đăng ký thành công!\n📝 Chưa có thẻ RFID (có thể thêm sau)`;
+                    
+                    alert(message);
+                    
+                    // Reset form
+                    document.getElementById('fullName').value = '';
+                    document.getElementById('privatePassword').value = '';
+                    document.getElementById('cardUID').value = '';
+                    showMainMenu();
+                } else {
+                    alert('❌ Lỗi: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('❌ Lỗi kết nối!');
+            }
+        }
+
+        // Thêm function cho đăng ký bằng KeyPad (giữ nguyên workflow cũ)
+        async function startRegistrationWithKeypad() {
+            const fullName = document.getElementById('fullName').value.trim();
+
+            if (!fullName) {
+                alert('Vui lòng nhập họ và tên trước khi dùng KeyPad!');
+                return;
+            }
+
+            try {
+                // Start registration mode với KeyPad
+                const response = await fetch(API_BASE + '/api/set-registration-mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'start',
+                        userData: { fullName }
+                    })
+                });
+
+                if (response.ok) {
+                    document.getElementById('registrationStatus').classList.remove('hidden');
+                    document.getElementById('statusMessage').textContent = 'Đang chờ nhập mật khẩu trên KeyPad ESP32...';
+                    
+                    // Poll for registration status
+                    registrationTimer = setInterval(checkRegistrationStatus, 2000);
+                } else {
+                    alert('Lỗi khi bắt đầu quá trình đăng ký!');
+                }
+            } catch (error) {
+                console.error('Error starting registration:', error);
+                alert('Lỗi kết nối!');
+            }
+        }
+
+        // Thêm function để bổ sung thẻ
+        function addCard(userId, userName) {
+            const uid = prompt(`Nhập UID thẻ RFID cho ${userName}:`);
+            if (uid && uid.trim()) {
+                updateUserUID(userId, uid.trim());
+            }
+        }
+
+        async function updateUserUID(userId, uid) {
+            try {
+                const response = await fetch(API_BASE + '/api/update-uid', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId, uid })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('✅ Đã thêm thẻ thành công!');
+                    loadUserList(); // Reload danh sách
+                } else {
+                    alert('❌ Lỗi: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('❌ Lỗi kết nối!');
             }
         }
     </script>

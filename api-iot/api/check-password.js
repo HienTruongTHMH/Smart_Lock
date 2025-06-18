@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
 
 export default async function handler(req, res) {
   // Enable CORS
@@ -26,32 +27,22 @@ export default async function handler(req, res) {
   });
 
   try {
-    // Check public password
-    const publicResult = await pool.query(
-      'SELECT * FROM "Manager_Sign_In" WHERE public_pwd = $1 LIMIT 1',
-      [password]
+    // Lấy tất cả mật khẩu đã mã hóa từ database
+    const result = await pool.query(
+      'SELECT id_user, "Full_Name", private_pwd FROM "Manager_Sign_In"'
     );
 
-    if (publicResult.rows.length > 0) {
-      return res.json({
-        valid: true,
-        type: 'public',
-        user: publicResult.rows[0].full_name
-      });
-    }
-
-    // Check private password
-    const privateResult = await pool.query(
-      'SELECT * FROM "Manager_Sign_In" WHERE private_pwd = $1 LIMIT 1',
-      [password]
-    );
-
-    if (privateResult.rows.length > 0) {
-      return res.json({
-        valid: true,
-        type: 'private',
-        user: privateResult.rows[0].full_name
-      });
+    for (let user of result.rows) {
+      // So sánh mật khẩu nhập vào với mật khẩu đã mã hóa
+      const isMatch = await bcrypt.compare(password, user.private_pwd);
+      
+      if (isMatch) {
+        return res.json({
+          valid: true,
+          type: 'private',
+          user: user.Full_Name
+        });
+      }
     }
 
     return res.json({ valid: false });

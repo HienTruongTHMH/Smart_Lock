@@ -1,10 +1,11 @@
 const { Pool } = require('pg');
 
-// Biến toàn cục để lưu trạng thái (trong production nên dùng Redis/Database)
+// Biến toàn cục để lưu trạng thái
 let registrationState = {
   isActive: false,
   userData: null,
-  step: 'waiting', // waiting, scanning, completed
+  step: 'waiting', // waiting, password_input, password_set, scanning, processing, completed
+  privatePassword: null,
   scannedUID: null,
   timestamp: null
 };
@@ -24,32 +25,42 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const { action, userData, uid } = req.body;
+    const { action, userData, password, uid } = req.body;
 
     switch (action) {
       case 'start':
         registrationState = {
           isActive: true,
           userData: userData,
-          step: 'scanning',
+          step: 'password_input',
+          privatePassword: null,
           scannedUID: null,
           timestamp: new Date().toISOString()
         };
-        return res.json({ success: true, message: 'Registration mode activated' });
+        return res.json({ success: true, message: 'Registration mode activated - waiting for password' });
+
+      case 'set_password':
+        if (registrationState.isActive && registrationState.step === 'password_input') {
+          registrationState.privatePassword = password;
+          registrationState.step = 'password_set';
+          return res.json({ success: true, message: 'Password set, ready for card scan' });
+        }
+        return res.json({ success: false, message: 'Registration mode not ready for password' });
 
       case 'scan_uid':
-        if (registrationState.isActive) {
+        if (registrationState.isActive && registrationState.step === 'password_set') {
           registrationState.scannedUID = uid;
           registrationState.step = 'processing';
           return res.json({ success: true, message: 'UID scanned successfully' });
         }
-        return res.json({ success: false, message: 'Registration mode not active' });
+        return res.json({ success: false, message: 'Registration mode not ready for card scan' });
 
       case 'complete':
         registrationState = {
           isActive: false,
           userData: null,
           step: 'completed',
+          privatePassword: null,
           scannedUID: null,
           timestamp: new Date().toISOString()
         };
@@ -60,6 +71,7 @@ export default async function handler(req, res) {
           isActive: false,
           userData: null,
           step: 'cancelled',
+          privatePassword: null,
           scannedUID: null,
           timestamp: new Date().toISOString()
         };
