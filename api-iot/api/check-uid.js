@@ -26,7 +26,7 @@ export default async function handler(req, res) {
 
   try {
     const result = await pool.query(
-      'SELECT * FROM "Manager_Sign_in" WHERE UPPER("UID") = UPPER($1)',
+      'SELECT * FROM "Manager_Sign_In" WHERE UPPER("UID") = UPPER($1)',
       [uid]
     );
 

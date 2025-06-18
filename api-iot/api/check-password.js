@@ -28,7 +28,7 @@ export default async function handler(req, res) {
   try {
     // Check public password
     const publicResult = await pool.query(
-      'SELECT * FROM "Manager_Sign_in" WHERE public_pwd = $1 LIMIT 1',
+      'SELECT * FROM "Manager_Sign_In" WHERE public_pwd = $1 LIMIT 1',
       [password]
     );
 
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
 
     // Check private password
     const privateResult = await pool.query(
-      'SELECT * FROM "Manager_Sign_in" WHERE private_pwd = $1 LIMIT 1',
+      'SELECT * FROM "Manager_Sign_In" WHERE private_pwd = $1 LIMIT 1',
       [password]
     );
 

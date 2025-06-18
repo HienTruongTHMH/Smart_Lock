@@ -9,11 +9,11 @@
 #include <time.h>  // Thêm thư viện time
 
 // WiFi credentials
-const char* ssid = "Minh Hien";
-const char* password_wifi = "0935515102";
+const char* ssid = "MHEPro";
+const char* password_wifi = "0934752432";
 
 // API endpoints - Cập nhật URL của bạn
-const char* api_base_url = "https://api-bgjq7jh5d-hiens-projects-d1689d2e.vercel.app"; // Hoặc URL Vercel của bạn
+const char* api_base_url = "https://api-8sh8dem5x-hiens-projects-d1689d2e.vercel.app"; // Hoặc URL Vercel của bạn
 const char* check_password_endpoint = "/api/check-password";
 const char* check_uid_endpoint = "/api/check-uid";
 const char* log_access_endpoint = "/api/log-access";
@@ -52,6 +52,13 @@ String input_pass = "";
 #define RST_PIN 2
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 byte validUID[4] = {0x67, 0xA2, 0x14, 0x05};
+
+// Thêm vào phần global variables
+bool registrationMode = false;
+String pendingUserName = "";
+String pendingPassword = "";
+unsigned long lastModeCheck = 0;
+const unsigned long MODE_CHECK_INTERVAL = 3000; // Check every 3 seconds
 
 void connectWiFi() {
   WiFi.begin(ssid, password_wifi);
@@ -131,7 +138,7 @@ bool checkPasswordAPI(String pass) {
   }
 }
 
-bool checkUIDAPI(byte* uid) {
+bool checkUIDAPI(String uid) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi not connected");
     return false;
@@ -143,12 +150,7 @@ bool checkUIDAPI(byte* uid) {
   http.setTimeout(10000);
   
   DynamicJsonDocument doc(1024);
-  String uidString = "";
-  for (int i = 0; i < 4; i++) {
-    if (uid[i] < 0x10) uidString += "0";
-    uidString += String(uid[i], HEX);
-  }
-  doc["uid"] = uidString;
+  doc["uid"] = uid;  // Trực tiếp dùng String
   
   String jsonString;
   serializeJson(doc, jsonString);
@@ -256,6 +258,70 @@ bool registerCardAPI(String userName, String privatePassword, String publicPassw
   }
 }
 
+// Thêm hàm check registration mode
+bool checkRegistrationMode() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  
+  HTTPClient http;
+  http.begin(String(api_base_url) + "/api/set-registration-mode");
+  int httpResponseCode = http.GET();
+  
+  if (httpResponseCode == 200) {
+    String response = http.getString();
+    
+    // Parse JSON response
+    if (response.indexOf("\"isActive\":true") > -1) {
+      if (response.indexOf("\"step\":\"scanning\"") > -1) {
+        registrationMode = true;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("CHE DO DANG KY");
+        lcd.setCursor(0, 1);
+        lcd.print("Quet the moi...");
+        return true;
+      }
+    } else {
+      if (registrationMode) {
+        // Exit registration mode
+        registrationMode = false;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Smart Lock");
+        lcd.setCursor(0, 1);
+        lcd.print("San sang...");
+      }
+    }
+  }
+  
+  http.end();
+  return registrationMode;
+}
+
+// Hàm send UID khi scan được thẻ mới
+bool sendScannedUID(String uid) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  
+  HTTPClient http;
+  http.begin(String(api_base_url) + "/api/set-registration-mode");
+  http.addHeader("Content-Type", "application/json");
+
+  String jsonData = "{\"action\":\"scan_uid\",\"uid\":\"" + uid + "\"}";
+  int httpResponseCode = http.POST(jsonData);
+  
+  if (httpResponseCode == 200) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Da quet the!");
+    lcd.setCursor(0, 1);
+    lcd.print("Dang xu ly...");
+    http.end();
+    return true;
+  }
+  
+  http.end();
+  return false;
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Starting Smart Lock...");
@@ -278,9 +344,23 @@ void setup() {
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Nhap mat khau:");
+
+  // Test API connection on startup
+  Serial.println("Testing API connection...");
+  HTTPClient http;
+  http.begin(String(api_base_url) + "/api/test-db");
+  int responseCode = http.GET();
+  Serial.println("API test response: " + String(responseCode));
+  http.end();
 }
 
 void loop() {
+  // Check registration mode periodically
+  if (millis() - lastModeCheck > MODE_CHECK_INTERVAL) {
+    checkRegistrationMode();
+    lastModeCheck = millis();
+  }
+
   char key = keypad.getKey();
   if (key) {
     Serial.println("Key pressed: " + String(key));
@@ -334,45 +414,42 @@ void loop() {
     }
   }
 
+  // RFID scanning logic
   if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
-    bool isValidUID = false;
-    
-    // Tạo UID string để debug
-    String uidString = "";
-    for (int i = 0; i < 4; i++) {
-      if (mfrc522.uid.uidByte[i] < 0x10) uidString += "0";
-      uidString += String(mfrc522.uid.uidByte[i], HEX);
+    String uid = "";
+    for (byte i = 0; i < mfrc522.uid.size; i++) {
+      uid += String(mfrc522.uid.uidByte[i], HEX);
     }
-    
-    Serial.println("Card detected: " + uidString);
-    
-    // Kiểm tra UID local trước
-    if (checkUID(mfrc522.uid.uidByte)) {
-      Serial.println("Local UID match");
-      isValidUID = true;
+    uid.toUpperCase();
+
+    if (registrationMode) {
+      // Registration mode - send UID to web
+      if (sendScannedUID(uid)) {
+        // Wait for registration completion
+        delay(2000);
+        // Check if registration completed
+        // (Web sẽ tự động complete sau khi đăng ký thành công)
+      }
     } else {
-      // Kiểm tra UID qua API
-      Serial.println("Checking UID via API...");
-      isValidUID = checkUIDAPI(mfrc522.uid.uidByte);
-    }
-    
-    if (isValidUID) {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("The hop le!");
-      Serial.println("Card valid!");
-      logAccess("rfid", uidString, true);
-      openLock();
-    } else {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("The sai");
-      Serial.println("Card invalid!");
-      logAccess("rfid", uidString, false);
-      delay(2000);
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Nhap mat khau:");
+      // Normal mode - check UID
+      if (checkUIDAPI(uid)) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("The hop le!");
+        lcd.setCursor(0, 1);
+        lcd.print("Mo cua...");
+        openLock();  // Sửa từ openDoor() thành openLock()
+      } else {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("The khong hop le");
+        delay(2000);
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Smart Lock");
+        lcd.setCursor(0, 1);
+        lcd.print("San sang...");
+      }
     }
 
     mfrc522.PICC_HaltA();

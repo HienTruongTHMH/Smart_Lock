@@ -13,10 +13,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { fullName, privatePassword, publicPassword, uid } = req.body;
+  const { fullName, privatePassword, uid, source = 'web' } = req.body;
 
-  if (!fullName || !privatePassword || !publicPassword || !uid) {
-    return res.status(400).json({ error: 'All fields are required' });
+  if (!fullName || !privatePassword || !uid) {
+    return res.status(400).json({ error: 'Full name, private password and UID are required' });
   }
 
   const pool = new Pool({
@@ -27,7 +27,7 @@ export default async function handler(req, res) {
   try {
     // Check if UID already exists
     const existing = await pool.query(
-      'SELECT * FROM "Manager_Sign_in" WHERE "UID" = $1',
+      'SELECT * FROM "Manager_Sign_In" WHERE "UID" = $1',
       [uid]
     );
 
@@ -35,19 +35,25 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'UID already exists' });
     }
 
-    // Insert new card
+    // Insert new user (public_pwd mặc định là "0000")
     const result = await pool.query(
-      'INSERT INTO "Manager_Sign_in" ("Full_Name", private_pwd, public_pwd, "UID") VALUES ($1, $2, $3, $4) RETURNING *',
-      [fullName, privatePassword, publicPassword, uid]
+      'INSERT INTO "Manager_Sign_In" ("Full_Name", private_pwd, public_pwd, "UID") VALUES ($1, $2, $3, $4) RETURNING *',
+      [fullName, privatePassword, "0000", uid]
     );
 
     return res.json({
       success: true,
-      message: 'Card registered successfully',
-      card: result.rows[0]
+      message: 'User registered successfully',
+      user: {
+        id: result.rows[0].id_user,
+        name: result.rows[0].Full_Name,
+        uid: result.rows[0].UID
+      },
+      source: source
     });
 
   } catch (err) {
+    console.error('Database error:', err);
     return res.status(500).json({ error: 'Database error', detail: err.message });
   } finally {
     await pool.end();
