@@ -133,8 +133,8 @@
     </div>
 
     <script>
-        // ✅ SỬA: Dùng URL Vercel cố định thay vì window.location.origin
-        const API_BASE = 'https://api-iot-v2-ijmd4r90s-hiens-projects-d1689d2e.vercel.app';
+        // ✅ SỬA: Sử dụng URL mới nhất từ console log
+        const API_BASE = 'https://api-iot-v2-7c6xmn69k-hiens-projects-d1689d2e.vercel.app';
         const SMART_LOCK_API = API_BASE + '/api/smart-lock';
         const ADMIN_API = API_BASE + '/api/admin';
 
@@ -147,6 +147,170 @@
         console.log('SMART_LOCK_API:', SMART_LOCK_API);
         console.log('ADMIN_API:', ADMIN_API);
         console.log('Current URL:', window.location.href);
+
+        // ✅ THÊM: Test CORS trước khi gọi API
+        async function testCORS() {
+            try {
+                console.log('🧪 Testing CORS...');
+                const response = await fetch(ADMIN_API, {
+                    method: 'OPTIONS',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Request-Method': 'POST',
+                        'Access-Control-Request-Headers': 'Content-Type'
+                    }
+                });
+                
+                console.log('✅ CORS test response:', response.status);
+                console.log('✅ CORS headers:', [...response.headers.entries()]);
+                return response.ok;
+            } catch (error) {
+                console.error('❌ CORS test failed:', error);
+                return false;
+            }
+        }
+
+        // ✅ SỬA: Enhanced error handling
+        async function startAddCard() {
+            const targetUserId = document.getElementById('userSelect').value;
+            
+            if (!targetUserId) {
+                alert('Vui lòng chọn người dùng!');
+                return;
+            }
+            
+            console.log('🎫 Starting add card for user:', targetUserId);
+            
+            // Test CORS first
+            const corsOk = await testCORS();
+            if (!corsOk) {
+                alert('Lỗi CORS: Không thể kết nối tới API server');
+                return;
+            }
+            
+            try {
+                console.log('📤 Sending add card request...');
+                console.log('🔗 URL:', ADMIN_API);
+                console.log('📋 Payload:', JSON.stringify({ 
+                    action: 'start_add_card',
+                    targetUserId: parseInt(targetUserId)
+                }));
+                
+                const response = await fetch(ADMIN_API, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    mode: 'cors',
+                    body: JSON.stringify({ 
+                        action: 'start_add_card',
+                        targetUserId: parseInt(targetUserId)
+                    })
+                });
+                
+                console.log('📥 Response status:', response.status);
+                console.log('📥 Response headers:', [...response.headers.entries()]);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ HTTP Error:', response.status, errorText);
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+                
+                const data = await response.json();
+                console.log('✅ Add card response:', data);
+                
+                if (data.success) {
+                    document.getElementById('addCard').classList.add('hidden');
+                    document.getElementById('addCardStatus').classList.remove('hidden');
+                    
+                    addCardTimer = setInterval(checkAddCardStatus, 2000);
+                    
+                } else {
+                    alert('Lỗi bắt đầu thêm thẻ: ' + (data.error || 'Unknown error'));
+                }
+                
+            } catch (error) {
+                console.error('❌ Error starting add card:', error);
+                console.error('❌ Error name:', error.name);
+                console.error('❌ Error message:', error.message);
+                
+                let errorMessage = 'Lỗi kết nối API: ';
+                
+                if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                    errorMessage += 'CORS hoặc network error. Kiểm tra:\n';
+                    errorMessage += '1. API server có hoạt động\n';
+                    errorMessage += '2. CORS configuration\n';
+                    errorMessage += '3. Network connectivity';
+                } else {
+                    errorMessage += error.message;
+                }
+                
+                alert(errorMessage);
+            }
+        }
+
+        // ✅ SỬA: Enhanced startRegistration với CORS test
+        async function startRegistration() {
+            const fullNameInput = document.getElementById('fullName');
+            const fullName = fullNameInput ? fullNameInput.value.trim() : '';
+            
+            if (!fullName) {
+                alert('Vui lòng nhập tên đầy đủ!');
+                return;
+            }
+
+            console.log('🚀 Starting registration for:', fullName);
+            
+            // Test CORS first
+            const corsOk = await testCORS();
+            if (!corsOk) {
+                alert('Lỗi CORS: Không thể kết nối tới API server');
+                return;
+            }
+            
+            try {
+                const response = await fetch(ADMIN_API, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    mode: 'cors',
+                    body: JSON.stringify({ 
+                        action: 'start_registration',
+                        userData: { fullName: fullName }
+                    })
+                });
+                
+                console.log('📥 Registration response status:', response.status);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ Registration HTTP error:', response.status, errorText);
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+                
+                const data = await response.json();
+                console.log('✅ Registration response:', data);
+                
+                if (data.success) {
+                    document.getElementById('registration').classList.add('hidden');
+                    document.getElementById('registrationStatus').classList.remove('hidden');
+                    
+                    document.getElementById('statusMessage').textContent = 'Đăng ký đã bắt đầu!';
+                    document.getElementById('statusDetail').textContent = 'ESP32 sẽ chuyển sang chế độ nhập mật khẩu...';
+                    
+                    registrationTimer = setInterval(checkRegistrationStatus, 2000);
+                } else {
+                    alert('Lỗi bắt đầu đăng ký: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('❌ Registration error:', error);
+                alert('Lỗi kết nối: ' + error.message);
+            }
+        }
 
         // =================== HELPER FUNCTIONS ===================
         function generateUserListHTML(users) {
@@ -523,17 +687,47 @@
                 return;
             }
             
+            console.log('🎫 Starting add card for user:', targetUserId);
+            
+            // Test CORS first
+            const corsOk = await testCORS();
+            if (!corsOk) {
+                alert('Lỗi CORS: Không thể kết nối tới API server');
+                return;
+            }
+            
             try {
+                console.log('📤 Sending add card request...');
+                console.log('🔗 URL:', ADMIN_API);
+                console.log('📋 Payload:', JSON.stringify({ 
+                    action: 'start_add_card',
+                    targetUserId: parseInt(targetUserId)
+                }));
+                
                 const response = await fetch(ADMIN_API, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    mode: 'cors',
                     body: JSON.stringify({ 
                         action: 'start_add_card',
                         targetUserId: parseInt(targetUserId)
                     })
                 });
                 
+                console.log('📥 Response status:', response.status);
+                console.log('📥 Response headers:', [...response.headers.entries()]);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ HTTP Error:', response.status, errorText);
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+                
                 const data = await response.json();
+                console.log('✅ Add card response:', data);
                 
                 if (data.success) {
                     document.getElementById('addCard').classList.add('hidden');
@@ -546,8 +740,22 @@
                 }
                 
             } catch (error) {
-                console.error('Error starting add card:', error);
-                alert('Lỗi kết nối: ' + error.message);
+                console.error('❌ Error starting add card:', error);
+                console.error('❌ Error name:', error.name);
+                console.error('❌ Error message:', error.message);
+                
+                let errorMessage = 'Lỗi kết nối API: ';
+                
+                if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                    errorMessage += 'CORS hoặc network error. Kiểm tra:\n';
+                    errorMessage += '1. API server có hoạt động\n';
+                    errorMessage += '2. CORS configuration\n';
+                    errorMessage += '3. Network connectivity';
+                } else {
+                    errorMessage += error.message;
+                }
+                
+                alert(errorMessage);
             }
         }
 

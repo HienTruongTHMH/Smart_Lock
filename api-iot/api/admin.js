@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { setupCors } from './_cors.js';
+import { setupCors, handleError } from './_cors.js';
 
 // ✅ Định nghĩa state mặc định
 const defaultState = {
@@ -10,29 +10,34 @@ const defaultState = {
   password: null,
   uid: null,
   startTime: null,
-  message: null // Thêm message để hiển thị trên ESP32
+  message: null
 };
 
 // ✅ Sử dụng biến global (chỉ trong phiên hiện tại)
 let registrationState = { ...defaultState };
 
 export default async function handler(req, res) {
-  // ✅ SỬA: Xử lý CORS trước tiên
+  // ✅ SỬA: Setup CORS đầu tiên cho TẤT CẢ requests
   setupCors(res);
   
-  // ✅ SỬA: Handle OPTIONS request properly
+  // ✅ SỬA: Handle OPTIONS request NGAY LẬP TỨC
   if (req.method === 'OPTIONS') {
     console.log('🔄 Handling CORS preflight request');
+    console.log('🔄 Origin:', req.headers.origin);
+    console.log('🔄 Method:', req.headers['access-control-request-method']);
+    console.log('🔄 Headers:', req.headers['access-control-request-headers']);
     return res.status(200).end();
   }
 
   console.log('📝 Admin API Request:', req.method, req.url);
+  console.log('📝 Origin:', req.headers.origin);
   console.log('📝 Request body:', req.body);
-  console.log('📝 Request headers origin:', req.headers.origin);
 
+  // ✅ ENHANCED error handling
   if (!process.env.POSTGRES_URL) {
     console.error('❌ POSTGRES_URL not configured');
     return res.status(500).json({ 
+      success: false,
       error: 'Database connection not configured',
       timestamp: new Date().toISOString()
     });
@@ -46,6 +51,7 @@ export default async function handler(req, res) {
   let client;
 
   try {
+    console.log('🔌 Connecting to database...');
     client = await pool.connect();
     console.log('✅ Database connected successfully');
     
@@ -58,7 +64,7 @@ export default async function handler(req, res) {
       )
     `);
     
-    // Load and validate state
+    // Load and validate state với enhanced error handling
     let registrationState = { ...defaultState };
     
     try {
@@ -119,6 +125,7 @@ export default async function handler(req, res) {
       
       if (!action) {
         return res.status(400).json({ 
+          success: false,
           error: 'Action is required',
           timestamp: new Date().toISOString()
         });
@@ -151,6 +158,7 @@ export default async function handler(req, res) {
         
         default:
           return res.status(400).json({ 
+            success: false,
             error: 'Invalid action: ' + action,
             validActions: ['start_registration', 'cancel_registration', 'submit_password', 'submit_card', 'complete_without_card', 'reset_state'],
             timestamp: new Date().toISOString()
@@ -159,6 +167,7 @@ export default async function handler(req, res) {
     }
 
     return res.status(405).json({ 
+      success: false,
       error: 'Method not allowed: ' + req.method,
       timestamp: new Date().toISOString()
     });
@@ -168,12 +177,8 @@ export default async function handler(req, res) {
     console.error('❌ Error details:', error.message);
     console.error('❌ Error stack:', error.stack);
     
-    return res.status(500).json({ 
-      error: 'Internal server error',
-      detail: error.message,
-      action: req.body?.action || 'unknown',
-      timestamp: new Date().toISOString()
-    });
+    // ✅ Use handleError to ensure CORS headers
+    return handleError(error, res);
   } finally {
     if (client) {
       client.release();
@@ -494,56 +499,75 @@ async function resetState(req, res, client, currentState) {
 
 // =================== CARD MANAGEMENT ===================
 
-async function startAddCard(req, res, client) {
+async function startAddCard(req, res, client, currentState) {
   const { targetUserId } = req.body;
   
+  console.log('🎫 Starting add card for user ID:', targetUserId);
+  
   if (!targetUserId) {
-    return res.status(400).json({ error: 'Target user ID is required' });
+    return res.status(400).json({ 
+      success: false,
+      error: 'Target user ID is required' 
+    });
   }
 
-  // Verify user exists
-  const userCheck = await client.query(
-    'SELECT * FROM "Manager_Sign_In" WHERE id_user = $1',
-    [targetUserId]
-  );
+  try {
+    // Verify user exists
+    const userCheck = await client.query(
+      'SELECT * FROM "Manager_Sign_In" WHERE id_user = $1',
+      [targetUserId]
+    );
 
-  if (userCheck.rows.length === 0) {
-    return res.status(404).json({ error: 'User not found' });
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'User not found' 
+      });
+    }
+
+    const user = userCheck.rows[0];
+
+    if (user.UID && user.UID.trim() !== '') {
+      return res.status(400).json({ 
+        success: false,
+        error: 'User already has a card: ' + user.UID 
+      });
+    }
+
+    console.log('🆔 Starting add card for:', user.Full_Name);
+
+    const newState = {
+      isActive: true,
+      step: 'add_card',
+      targetUserId: targetUserId,
+      userData: user,
+      password: null,
+      uid: null,
+      startTime: Date.now(),
+      message: 'Quét thẻ RFID để gán cho ' + user.Full_Name
+    };
+    
+    await client.query(
+      'UPDATE "System_State" SET value = $1, updated_at = CURRENT_TIMESTAMP WHERE key = $2',
+      [JSON.stringify(newState), 'registration_state']
+    );
+    
+    console.log('✅ Add card state set:', newState);
+    
+    return res.json({ 
+      success: true, 
+      message: 'Add Card mode activated - ESP32 should enter scan mode',
+      targetUser: user.Full_Name,
+      state: newState
+    });
+  } catch (error) {
+    console.error('❌ Start add card error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to start add card mode',
+      detail: error.message
+    });
   }
-
-  const user = userCheck.rows[0];
-
-  if (user.UID && user.UID.trim() !== '') {
-    return res.status(400).json({ error: 'User already has a card' });
-  }
-
-  console.log('🆔 Starting add card for:', user.Full_Name);
-
-  registrationState = {
-    isActive: true,
-    step: 'add_card',
-    targetUserId: targetUserId,
-    userData: user,
-    password: null,
-    uid: null,
-    startTime: Date.now(),
-    message: 'Quét thẻ RFID để gán cho ' + user.Full_Name
-  };
-  
-  // ✅ THÊM: Lưu state vào database
-  await client.query(
-    'UPDATE "System_State" SET value = $1 WHERE key = $2',
-    [JSON.stringify(registrationState), 'registration_state']
-  );
-  
-  console.log('✅ Add card state set:', registrationState);
-  
-  return res.json({ 
-    success: true, 
-    message: 'Add Card mode activated - ESP32 should enter scan mode',
-    targetUser: user.Full_Name,
-    state: registrationState
-  });
 }
 
 async function cancelAddCard(req, res, client) {
