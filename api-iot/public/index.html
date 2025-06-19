@@ -129,12 +129,63 @@
     </div>
 
     <script>
-        const API_BASE = "https://api-i6f5axhif-hiens-projects-d1689d2e.vercel.app"; // Tự động detect domain hiện tại
+        // ✅ SỬA: Dùng URL Vercel cố định thay vì window.location.origin
+        const API_BASE = window.location.origin;
         const SMART_LOCK_API = API_BASE + '/api/smart-lock';
         const ADMIN_API = API_BASE + '/api/admin';
 
         let registrationTimer = null;
         let addCardTimer = null;
+
+        // Debug logging
+        console.log('🔗 API Configuration:');
+        console.log('API_BASE:', API_BASE);
+        console.log('SMART_LOCK_API:', SMART_LOCK_API);
+        console.log('ADMIN_API:', ADMIN_API);
+        console.log('Current URL:', window.location.href);
+
+        // =================== HELPER FUNCTIONS ===================
+        function generateUserListHTML(users) {
+            console.log('🔧 generateUserListHTML called with:', users);
+            console.log('🔧 users type:', typeof users);
+            console.log('🔧 users length:', users ? users.length : 'null/undefined');
+            
+            if (!users || !Array.isArray(users) || users.length === 0) {
+                console.log('🔧 No users, returning empty message');
+                return '<p class="text-gray-500">Không có người dùng nào.</p>';
+            }
+            
+            console.log('🔧 Processing', users.length, 'users');
+            
+            let html = `<h3 class="text-lg font-semibold mb-4">Danh sách người dùng (${users.length})</h3><div class="space-y-2">`;
+            
+            users.forEach((user, index) => {
+                console.log(`🔧 Processing user ${index}:`, user);
+                const safeName = (user.name || '').replace(/'/g, "\\'").replace(/"/g, "&quot;");
+                html += `
+                    <div class="bg-gray-50 p-3 rounded-lg">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <div class="font-medium">${user.name || 'Unknown'}</div>
+                                <div class="text-sm text-gray-600">
+                                    ID: ${user.id} | 
+                                    ${user.uid ? `🎫 Thẻ: ${user.uid}` : `📝 Chưa có thẻ RFID`} |
+                                    ${user.hasPassword ? '🔑 Có mật khẩu' : '❌ Chưa có mật khẩu'}
+                                </div>
+                                <div class="text-xs text-gray-500">
+                                    Tạo: ${user.createdAt ? new Date(user.createdAt).toLocaleString() : 'N/A'}
+                                </div>
+                            </div>
+                            ${!user.uid ? `<button onclick="addCard(${user.id}, '${safeName}')" class="text-blue-600 hover:text-blue-800 text-sm">+ Thêm thẻ</button>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            console.log('🔧 Generated HTML length:', html.length);
+            return html;
+        }
 
         // =================== NAVIGATION ===================
         function showMainMenu() {
@@ -171,94 +222,101 @@
             resultDiv.innerHTML = '🔄 Testing connection...';
             
             try {
-                // ✅ SỬA: Dùng SMART_LOCK_API với action=test_connection
-                const response = await fetch(`${SMART_LOCK_API}?action=test_connection`);
+                const testUrl = `${SMART_LOCK_API}?action=test_connection`;
+                console.log('🔗 Testing:', testUrl);
+                
+                const response = await fetch(testUrl);
+                console.log('📥 Response status:', response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
                 const data = await response.json();
+                console.log('📥 Response data:', data);
                 
                 if (data.success) {
                     resultDiv.innerHTML = `
                         <div class="text-green-600">
-                            ✅ Database connected successfully!<br>
-                            <small>Time: ${new Date(data.timestamp).toLocaleString()}</small><br>
-                            <small>PostgreSQL: ${data.pgVersion}</small>
+                            ✅ Database connected!<br>
+                            <small>${new Date(data.timestamp).toLocaleString()}</small><br>
+                            <small>${data.pgVersion}</small>
                         </div>
                     `;
                 } else {
-                    resultDiv.innerHTML = `<div class="text-red-600">❌ Connection failed: ${data.error}</div>`;
+                    resultDiv.innerHTML = `<div class="text-red-600">❌ Failed: ${data.error}</div>`;
                 }
             } catch (error) {
                 console.error('Database test error:', error);
-                resultDiv.innerHTML = `<div class="text-red-600">❌ Connection error: ${error.message}</div>`;
+                resultDiv.innerHTML = `<div class="text-red-600">❌ Error: ${error.message}</div>`;
             }
         }
 
         // =================== USER LIST ===================
         async function loadUserList() {
-            try {
-                // ✅ SỬA: Dùng SMART_LOCK_API với action=get_users
-                const response = await fetch(`${SMART_LOCK_API}?action=get_users`);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                
-                const data = await response.json();
+                console.log('📋 Loading user list...');
+    
+                try {
+                    const url = `${SMART_LOCK_API}?action=get_users`;
+                    console.log('📡 Fetching:', url);
+                    
+                    const response = await fetch(url);
+                    console.log('📥 Response status:', response.status);
+                    
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error('❌ Response error:', errorText);
+                        throw new Error(`HTTP ${response.status}: ${errorText}`);
+                    }
+                    
+                    const data = await response.json();
+                    console.log('📥 Response data:', data);
+                    console.log('📥 Users array:', data.users);
+                    console.log('📥 Users type:', typeof data.users);
+                    console.log('📥 Users length:', data.users ? data.users.length : 'undefined');
 
-                if (data.success) {
                     const content = document.getElementById('userListContent');
-                    content.innerHTML = `
-                        <h3 class="text-lg font-semibold mb-4">Danh sách người dùng (${data.users.length})</h3>
-                        <div class="space-y-2">
-                            ${data.users.map(user => `
-                                <div class="bg-gray-50 p-3 rounded-lg">
-                                    <div class="flex justify-between items-start">
-                                        <div>
-                                            <div class="font-medium">${user.name}</div>
-                                            <div class="text-sm text-gray-600">
-                                                ID: ${user.id} | 
-                                                ${user.uid 
-                                                    ? `🎫 Thẻ: ${user.uid}` 
-                                                    : `📝 Chưa có thẻ RFID`
-                                                } |
-                                                ${user.hasPassword ? '🔑 Có mật khẩu' : '❌ Chưa có mật khẩu'}
-                                            </div>
-                                            <div class="text-xs text-gray-500">
-                                                Tạo: ${user.createdAt ? new Date(user.createdAt).toLocaleString() : 'N/A'}
-                                            </div>
-                                        </div>
-                                        ${!user.uid ? `
-                                            <button onclick="addCard(${user.id}, '${user.name}')" 
-                                                    class="text-blue-600 hover:text-blue-800 text-sm">
-                                                + Thêm thẻ
-                                            </button>
-                                        ` : ''}
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-                    `;
-                } else {
+                    
+                    if (data.success && data.users) {
+                        console.log('✅ Generating HTML for', data.users.length, 'users');
+                        console.log('✅ First user:', data.users[0]);
+                        
+                        const html = generateUserListHTML(data.users);
+                        console.log('✅ Generated HTML:', html.substring(0, 200) + '...');
+                        
+                        content.innerHTML = html;
+                        console.log('✅ HTML inserted into DOM');
+                        console.log('✅ Content element innerHTML length:', content.innerHTML.length);
+                    } else {
+                        console.log('❌ No users data or success=false');
+                        content.innerHTML = `<p class="text-red-600">Lỗi: ${data.error || 'No users found'}</p>`;
+                    }
+                } catch (error) {
+                    console.error('❌ Error loading user list:', error);
                     document.getElementById('userListContent').innerHTML = 
-                        `<p class="text-red-600">Lỗi tải danh sách: ${data.error || 'Unknown error'}</p>`;
+                        `<p class="text-red-600">Lỗi kết nối: ${error.message}</p>`;
                 }
-            } catch (error) {
-                console.error('Error loading user list:', error);
-                document.getElementById('userListContent').innerHTML = 
-                    `<p class="text-red-600">Lỗi kết nối: ${error.message}</p>`;
             }
-        }
 
         // =================== ACCESS LOG ===================
         async function loadAccessLog() {
+            console.log('📊 Loading access log...');
+            
             try {
-                // ✅ SỬA: Dùng SMART_LOCK_API với action=get_access_log
-                const response = await fetch(`${SMART_LOCK_API}?action=get_access_log&limit=30`);
+                const url = `${SMART_LOCK_API}?action=get_access_log&limit=30`;
+                console.log('📡 Fetching:', url);
+                
+                const response = await fetch(url);
+                console.log('📥 Response status:', response.status);
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const errorText = await response.text();
+                    console.error('❌ Response error:', errorText);
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
                 }
                 
                 const data = await response.json();
+                console.log('📥 Response data:', data);
 
                 if (data.success) {
                     const content = document.getElementById('accessLogContent');
@@ -307,7 +365,6 @@
             const fullName = document.getElementById('fullName').value.trim();
             
             try {
-                // ✅ SỬA: Dùng ADMIN_API
                 const response = await fetch(ADMIN_API, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -320,14 +377,12 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    // Show status and start monitoring
                     document.getElementById('registration').classList.add('hidden');
                     document.getElementById('registrationStatus').classList.remove('hidden');
                     
                     document.getElementById('statusMessage').textContent = 'Đăng ký đã bắt đầu!';
                     document.getElementById('statusDetail').textContent = 'ESP32 sẽ chuyển sang chế độ nhập mật khẩu...';
                     
-                    // Start checking status every 2 seconds
                     registrationTimer = setInterval(checkRegistrationStatus, 2000);
                     
                 } else {
@@ -342,12 +397,10 @@
 
         async function checkRegistrationStatus() {
             try {
-                // ✅ SỬA: Dùng ADMIN_API
                 const response = await fetch(ADMIN_API);
                 const data = await response.json();
 
                 if (!data.isActive) {
-                    // Đăng ký hoàn tất hoặc bị hủy
                     clearInterval(registrationTimer);
                     registrationTimer = null;
                     
@@ -375,7 +428,6 @@
 
         async function cancelRegistration() {
             try {
-                // ✅ SỬA: Dùng ADMIN_API
                 await fetch(ADMIN_API, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -398,14 +450,12 @@
         // =================== ADD CARD ===================
         async function loadUsersWithoutCards() {
             try {
-                // ✅ SỬA: Dùng SMART_LOCK_API
                 const response = await fetch(`${SMART_LOCK_API}?action=get_users`);
                 const data = await response.json();
 
                 const userSelect = document.getElementById('userSelect');
                 
                 if (data.success) {
-                    // Filter users without cards
                     const usersWithoutCards = data.users.filter(user => !user.uid || user.uid.trim() === '');
                     
                     if (usersWithoutCards.length === 0) {
@@ -434,7 +484,6 @@
             }
             
             try {
-                // ✅ SỬA: Dùng ADMIN_API
                 const response = await fetch(ADMIN_API, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -447,11 +496,9 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    // Show status and start monitoring
                     document.getElementById('addCard').classList.add('hidden');
                     document.getElementById('addCardStatus').classList.remove('hidden');
                     
-                    // Start checking status every 2 seconds
                     addCardTimer = setInterval(checkAddCardStatus, 2000);
                     
                 } else {
@@ -466,19 +513,16 @@
 
         async function checkAddCardStatus() {
             try {
-                // ✅ SỬA: Dùng ADMIN_API
                 const response = await fetch(ADMIN_API);
                 const data = await response.json();
                 
                 if (data.step !== 'add_card' || !data.isActive) {
-                    // Add card completed or cancelled
                     clearInterval(addCardTimer);
                     addCardTimer = null;
                     
                     document.getElementById('addCardStatus').classList.add('hidden');
                     showMainMenu();
                     
-                    // Show success message
                     alert('Thẻ đã được thêm thành công!');
                 }
             } catch (error) {
@@ -488,7 +532,6 @@
 
         async function cancelAddCard() {
             try {
-                // ✅ SỬA: Dùng ADMIN_API
                 await fetch(ADMIN_API, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -508,11 +551,9 @@
             }
         }
 
-        // Quick add card function for user list buttons
         async function addCard(userId, userName) {
             if (confirm(`Thêm thẻ RFID cho ${userName}?`)) {
                 try {
-                    // ✅ SỬA: Dùng ADMIN_API
                     const response = await fetch(ADMIN_API, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -538,8 +579,9 @@
 
         // Initialize on page load
         window.onload = function() {
-            console.log('Smart Lock Management System loaded');
-            console.log('API Base:', API_BASE);
+            console.log('🚀 Smart Lock Management System loaded');
+            console.log('✅ API Base:', API_BASE);
+            console.log('✅ Current URL:', window.location.href);
         };
     </script>
 </body>

@@ -168,42 +168,56 @@ async function completeRegistration(res, pool) {
     return res.status(400).json({ error: 'Password not set' });
   }
 
-  // Generate user ID
-  const userIdResult = await pool.query('SELECT COALESCE(MAX(id_user), 0) + 1 as next_id FROM "Manager_Sign_In"');
-  const newUserId = userIdResult.rows[0].next_id;
-  
-  // Generate name - use provided name or auto-generate
-  const userName = registrationState.userData?.fullName || `User${String(newUserId).padStart(3, '0')}`;
-  
-  // Insert new user
-  const insertResult = await pool.query(
-    `INSERT INTO "Manager_Sign_In" (id_user, "Full_Name", private_pwd, "UID", created_at) 
-     VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
-    [newUserId, userName, registrationState.password, registrationState.uid]
-  );
+  let client;
+  try {
+    client = await pool.connect();
+    
+    // Generate user ID
+    const userIdResult = await client.query('SELECT COALESCE(MAX(id_user), 0) + 1 as next_id FROM "Manager_Sign_In"');
+    const newUserId = userIdResult.rows[0].next_id;
+    
+    // Generate name - use provided name or auto-generate
+    const userName = registrationState.userData?.fullName || `User${String(newUserId).padStart(3, '0')}`;
+    
+    // ✅ SỬA: Không dùng created_at vì không có trong cấu trúc gốc
+    const insertResult = await client.query(
+      `INSERT INTO "Manager_Sign_In" (id_user, "Full_Name", private_pwd, "UID") 
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [newUserId, userName, registrationState.password, registrationState.uid]
+    );
 
-  console.log('✅ Registration completed for:', userName);
-  
-  // Reset state
-  registrationState = {
-    isActive: false,
-    step: 'waiting',
-    targetUserId: null,
-    userData: null,
-    password: null,
-    uid: null,
-    startTime: null
-  };
-  
-  return res.json({
-    success: true,
-    message: 'User registered successfully',
-    user: {
-      id: insertResult.rows[0].id_user,
-      name: insertResult.rows[0].Full_Name,
-      uid: insertResult.rows[0].UID
-    }
-  });
+    console.log('✅ Registration completed for:', userName);
+    
+    // Reset state
+    registrationState = {
+      isActive: false,
+      step: 'waiting',
+      targetUserId: null,
+      userData: null,
+      password: null,
+      uid: null,
+      startTime: null
+    };
+    
+    client.release();
+    
+    return res.json({
+      success: true,
+      message: 'User registered successfully',
+      user: {
+        id: insertResult.rows[0].id_user,
+        name: insertResult.rows[0].Full_Name,
+        uid: insertResult.rows[0].UID
+      }
+    });
+  } catch (error) {
+    console.error('❌ Complete registration error:', error);
+    if (client) client.release();
+    return res.status(500).json({ 
+      error: 'Failed to complete registration', 
+      detail: error.message 
+    });
+  }
 }
 
 // =================== CARD MANAGEMENT ===================

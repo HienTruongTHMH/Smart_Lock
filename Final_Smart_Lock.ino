@@ -13,7 +13,7 @@ const char* ssid = "MHEPro";
 const char* password_wifi = "0934752432";
 
 // API endpoints
-const char* api_base_url = "https://api-i6f5axhif-hiens-projects-d1689d2e.vercel.app";
+const char* api_base_url = "https://api-6iawvaohj-hiens-https://api-r60blc410-hiens-projects-d1689d2e.vercel.app-d1689d2e.vercel.app";
 const char* smart_lock_endpoint = "/api/smart-lock";
 const char* admin_endpoint = "/api/admin";
 
