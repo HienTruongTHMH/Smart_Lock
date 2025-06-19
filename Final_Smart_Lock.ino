@@ -75,6 +75,8 @@ const unsigned long ADD_CARD_TIMEOUT = 30000;
 unsigned long lcdMessageTimer = 0;
 bool lcdMessageToggle = false;
 String fullMessage = "";
+unsigned long lastTimeDisplay = 0;
+const unsigned long TIME_DISPLAY_INTERVAL = 10000; // 10 giây cập nhật thời gian hiển thị
 
 // =================== SETUP ===================
 void setup() {
@@ -993,12 +995,7 @@ void handleRFIDScan() {
 
 // =================== MAIN LOOP ===================
 void loop() {
-  // Check registration mode periodically
-  if (millis() - lastModeCheck > MODE_CHECK_INTERVAL) {
-    checkRegistrationMode();
-    lastModeCheck = millis();
-  }
-
+  // 1. CHỨC NĂNG CHÍNH: Xử lý keypad và RFID để mở khóa
   char key = keypad.getKey();
   
   if (key && key != lastKey && (millis() - lastKeyTime > KEY_DEBOUNCE_DELAY)) {
@@ -1006,25 +1003,58 @@ void loop() {
     lastKey = key;
     lastKeyTime = millis();
     
-    if (registrationMode && registrationStep == "password_input") {
+    // Normal mode (mở khóa cửa) được ưu tiên xử lý đầu tiên
+    if (!registrationMode && !addCardMode) {
+      handleNormalModeInput(key);
+    }
+    // Các chế độ đặc biệt chỉ khi được yêu cầu từ web interface
+    else if (registrationMode && registrationStep == "password_input") {
       handleRegistrationPasswordInput(key);
     }
     else if (registrationMode && registrationStep == "password_set") {
-      handleCardScanInput(key); // Thêm xử lý này
+      handleCardScanInput(key);
     }
-    else if (!registrationMode && !addCardMode) {
-      handleNormalModeInput(key);
-    }
-    // Add Card mode chỉ dùng RFID, không cần keypad
   }
   
+  // Reset last key
   if (millis() - lastKeyTime > 1000) {
     lastKey = 0;
   }
 
+  // Xử lý quét thẻ RFID - chức năng chính
   handleRFIDScan();
 
-  if (registrationMode && registrationStep == "password_set" && (millis() - lcdMessageTimer > 3000)) {
+  // 2. HIỂN THỊ THỜI GIAN KHI Ở CHẾ ĐỘ CHỜ
+  // Hiển thị thời gian và ngày tháng khi ở chế độ chờ (normal mode)
+  if (!registrationMode && !addCardMode && !inputStarted && 
+      millis() - lastTimeDisplay > TIME_DISPLAY_INTERVAL) {
+    
+    struct tm timeinfo;
+    if(getLocalTime(&timeinfo)) {
+      char timeString[16];
+      strftime(timeString, 16, "%H:%M:%S", &timeinfo);
+      
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Smart Lock Ready");
+      lcd.setCursor(0, 1);
+      lcd.print(timeString);
+    }
+    
+    lastTimeDisplay = millis();
+  }
+  
+  // 3. CHECK REGISTRATION MODE - Chỉ khi cần thiết
+  if (millis() - lastModeCheck > MODE_CHECK_INTERVAL) {
+    // Check xem có yêu cầu đăng ký/thêm thẻ từ web interface không
+    checkRegistrationMode();
+    lastModeCheck = millis();
+  }
+
+  // 4. CÁC HIỂN THỊ KHÁC CHỈ KHI Ở CHẾ ĐỘ REGISTRATION
+  // Toggle message chỉ khi ở chế độ đăng ký
+  if (registrationMode && registrationStep == "password_set" && 
+      (millis() - lcdMessageTimer > 3000)) {
     lcdMessageTimer = millis();
     lcdMessageToggle = !lcdMessageToggle;
     
