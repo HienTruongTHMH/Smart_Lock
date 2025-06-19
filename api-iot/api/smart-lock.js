@@ -1,20 +1,20 @@
 import { Pool } from 'pg';
-import { setupCors, handleOptions } from './_cors.js';
+import { setupCors, handleOptions, handleError } from './_cors.js';
 
 export default async function handler(req, res) {
-  // ✅ Setup CORS
+  // ✅ Setup CORS đầu tiên
   setupCors(res);
   
   // ✅ Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    console.log('🔄 Smart Lock API - Handling CORS preflight');
+    return handleOptions(req, res);
   }
 
-  // ✅ LOG CHI TIẾT REQUEST
   console.log('🚀 === SMART LOCK API REQUEST ===');
   console.log('Method:', req.method);
   console.log('URL:', req.url);
-  console.log('Query:', req.query);
+  console.log('Origin:', req.headers.origin);
   console.log('Body:', req.body);
 
   // Get action from query params (GET) or body (POST)

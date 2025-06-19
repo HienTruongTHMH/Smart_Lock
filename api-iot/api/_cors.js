@@ -1,7 +1,7 @@
 export function setupCors(res) {
-  // ✅ SỬA: Cho phép tất cả origins hoặc specific domain
+  // ✅ SỬA: Chỉ set một lần, cho phép tất cả origins
   res.setHeader('Access-Control-Allow-Origin', 'https://smart-lock-by-git.vercel.app');
-  // ✅ Hoặc specific domain nếu muốn bảo mật hơn:
+  // ✅ HOẶC nếu muốn specific domain:
   // res.setHeader('Access-Control-Allow-Origin', 'https://smart-lock-by-git.vercel.app');
   
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -9,27 +9,23 @@ export function setupCors(res) {
   res.setHeader('Access-Control-Allow-Credentials', 'false');
   res.setHeader('Access-Control-Max-Age', '86400');
   
-  // ✅ SỬA: Fix logic lỗi
-  return false; // Always return false, không end response ở đây
+  // ✅ SỬA: Thêm Vary header để browser cache đúng
+  res.setHeader('Vary', 'Origin');
+  
+  return false;
 }
 
 export function handleOptions(req, res) {
   console.log('🔄 Handling OPTIONS preflight request');
   console.log('🔄 Origin:', req.headers.origin);
-  console.log('🔄 Request headers:', req.headers['access-control-request-headers']);
+  console.log('🔄 Method:', req.headers['access-control-request-method']);
+  console.log('🔄 Headers:', req.headers['access-control-request-headers']);
   
   setupCors(res);
   
-  if (req.method === 'OPTIONS') {
-    console.log('✅ Sending OPTIONS response');
-    res.status(200).end();
-    return true;
-  }
-  
-  return false;
+  return res.status(200).end();
 }
 
-// Hàm mới - gọi trong try-catch block
 export function handleError(error, res) {
   console.error('❌ API Error:', error);
   console.error('❌ Stack:', error.stack);

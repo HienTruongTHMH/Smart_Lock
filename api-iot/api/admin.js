@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { setupCors, handleError } from './_cors.js';
+import { setupCors, handleOptions, handleError } from './_cors.js';
 
 // ✅ Định nghĩa state mặc định
 const defaultState = {
@@ -13,27 +13,21 @@ const defaultState = {
   message: null
 };
 
-// ✅ Sử dụng biến global (chỉ trong phiên hiện tại)
-let registrationState = { ...defaultState };
-
 export default async function handler(req, res) {
-  // ✅ SỬA: Setup CORS đầu tiên cho TẤT CẢ requests
+  // ✅ SỬA: Setup CORS cho tất cả requests
   setupCors(res);
   
-  // ✅ SỬA: Handle OPTIONS request NGAY LẬP TỨC
+  // ✅ SỬA: Handle OPTIONS request bằng function từ _cors.js
   if (req.method === 'OPTIONS') {
-    console.log('🔄 Handling CORS preflight request');
-    console.log('🔄 Origin:', req.headers.origin);
-    console.log('🔄 Method:', req.headers['access-control-request-method']);
-    console.log('🔄 Headers:', req.headers['access-control-request-headers']);
-    return res.status(200).end();
+    console.log('🔄 Admin API - Handling CORS preflight');
+    return handleOptions(req, res);
   }
 
   console.log('📝 Admin API Request:', req.method, req.url);
   console.log('📝 Origin:', req.headers.origin);
+  console.log('📝 User-Agent:', req.headers['user-agent']);
   console.log('📝 Request body:', req.body);
 
-  // ✅ ENHANCED error handling
   if (!process.env.POSTGRES_URL) {
     console.error('❌ POSTGRES_URL not configured');
     return res.status(500).json({ 
@@ -55,7 +49,7 @@ export default async function handler(req, res) {
     client = await pool.connect();
     console.log('✅ Database connected successfully');
     
-    // ✅ Create table if it doesn't exist
+    // Create table if it doesn't exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS "System_State" (
         key TEXT PRIMARY KEY,
@@ -64,8 +58,8 @@ export default async function handler(req, res) {
       )
     `);
     
-    // Load and validate state với enhanced error handling
-    let registrationState = { ...defaultState };
+    // Load state với better error handling
+    let registrationState;
     
     try {
       const stateResult = await client.query(
@@ -79,7 +73,7 @@ export default async function handler(req, res) {
         if (loadedState && typeof loadedState === 'object') {
           registrationState = {
             isActive: Boolean(loadedState.isActive),
-            step: loadedState.step || 'waiting',
+            step: String(loadedState.step || 'waiting'),
             targetUserId: loadedState.targetUserId || null,
             userData: loadedState.userData || null,
             password: loadedState.password || null,
@@ -97,7 +91,7 @@ export default async function handler(req, res) {
         registrationState = { ...defaultState };
       }
       
-      // Ensure state exists in database
+      // Always ensure state exists in database
       await client.query(
         'INSERT INTO "System_State" (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = CURRENT_TIMESTAMP',
         ['registration_state', JSON.stringify(registrationState)]
@@ -107,6 +101,7 @@ export default async function handler(req, res) {
       console.error('❌ Error loading state:', stateError);
       registrationState = { ...defaultState };
       
+      // Force insert default state
       await client.query(
         'INSERT INTO "System_State" (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = CURRENT_TIMESTAMP',
         ['registration_state', JSON.stringify(registrationState)]
@@ -131,6 +126,7 @@ export default async function handler(req, res) {
         });
       }
       
+      // Route to appropriate function
       switch (action) {
         case 'start_registration':
           return await startRegistration(req, res, client, registrationState);
@@ -169,15 +165,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ 
       success: false,
       error: 'Method not allowed: ' + req.method,
+      allowedMethods: ['GET', 'POST', 'OPTIONS'],
       timestamp: new Date().toISOString()
     });
 
   } catch (error) {
     console.error('❌ Admin API Error:', error);
-    console.error('❌ Error details:', error.message);
-    console.error('❌ Error stack:', error.stack);
-    
-    // ✅ Use handleError to ensure CORS headers
     return handleError(error, res);
   } finally {
     if (client) {
