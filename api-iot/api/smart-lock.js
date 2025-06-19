@@ -113,8 +113,7 @@ export default async function handler(req, res) {
       client.release();
       console.log('🔌 Database connection released');
     }
-    await pool.end();
-    console.log('🔌 Pool ended');
+    // ❌ REMOVE: await pool.end();
   }
 }
 

@@ -563,10 +563,10 @@ async function startAddCard(req, res, client, currentState) {
   }
 }
 
-async function cancelAddCard(req, res, client) {
+async function cancelAddCard(req, res, client, currentState) {
   console.log('❌ Add Card mode cancelled');
   
-  registrationState = {
+  const cancelledState = {
     isActive: false,
     step: 'waiting',
     targetUserId: null,
@@ -577,25 +577,24 @@ async function cancelAddCard(req, res, client) {
     message: 'Thêm thẻ đã bị hủy'
   };
   
-  // ✅ THÊM: Lưu state vào database
   await client.query(
-    'UPDATE "System_State" SET value = $1 WHERE key = $2',
-    [JSON.stringify(registrationState), 'registration_state']
+    'UPDATE "System_State" SET value = $1, updated_at = CURRENT_TIMESTAMP WHERE key = $2',
+    [JSON.stringify(cancelledState), 'registration_state']
   );
   
   return res.json({ 
     success: true, 
     message: 'Add Card mode cancelled',
-    state: registrationState
+    state: cancelledState
   });
 }
 
 // =================== GENERAL ===================
 
-async function cancelRegistration(req, res, client) {
+async function cancelRegistration(req, res, client, currentState) {
   console.log('❌ Registration cancelled');
   
-  registrationState = {
+  const cancelledState = {
     isActive: false,
     step: 'waiting',
     targetUserId: null,
@@ -606,15 +605,14 @@ async function cancelRegistration(req, res, client) {
     message: 'Đăng ký đã bị hủy'
   };
   
-  // ✅ THÊM: Lưu state vào database
   await client.query(
-    'UPDATE "System_State" SET value = $1 WHERE key = $2',
-    [JSON.stringify(registrationState), 'registration_state']
+    'UPDATE "System_State" SET value = $1, updated_at = CURRENT_TIMESTAMP WHERE key = $2',
+    [JSON.stringify(cancelledState), 'registration_state']
   );
   
   return res.json({ 
     success: true, 
     message: 'Registration cancelled',
-    state: registrationState
+    state: cancelledState
   });
 }

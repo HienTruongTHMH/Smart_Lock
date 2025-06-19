@@ -13,7 +13,7 @@ const char* ssid = "MHEPro";
 const char* password_wifi = "0934752432";
 
 // API endpoints
-const char* api_base_url = "https://api-iot-v2-bsz2cgj9r-hiens-projects-d1689d2e.vercel.app";
+const char* api_base_url = "https://api-iot-v2-4s8lsfdao-hiens-projects-d1689d2e.vercel.app";
 const char* smart_lock_endpoint = "/api/smart-lock";
 const char* admin_endpoint = "/api/admin";
 
@@ -450,12 +450,13 @@ bool sendCardIdToAPI(String uid) {
   if (WiFi.status() != WL_CONNECTED) return false;
   
   HTTPClient http;
-  http.begin(String(api_base_url) + smart_lock_endpoint);
+  // ✅ Use admin endpoint for add card (consistency with registration)
+  http.begin(String(api_base_url) + admin_endpoint);
   http.addHeader("Content-Type", "application/json");
   http.setTimeout(10000);
   
   DynamicJsonDocument doc(1024);
-  doc["action"] = "add_card";
+  doc["action"] = "submit_card"; // Use admin action
   doc["uid"] = uid;
   doc["userId"] = targetUserId;
   
