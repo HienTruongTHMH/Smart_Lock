@@ -71,6 +71,11 @@ String targetUserId = "";
 unsigned long addCardStartTime = 0;
 const unsigned long ADD_CARD_TIMEOUT = 30000;
 
+// Thêm biến toàn cục
+unsigned long lcdMessageTimer = 0;
+bool lcdMessageToggle = false;
+String fullMessage = "";
+
 // =================== SETUP ===================
 void setup() {
   Serial.begin(115200);
@@ -592,7 +597,7 @@ bool sendScannedUID(String uid) {
   http.setTimeout(10000);
 
   DynamicJsonDocument doc(1024);
-  doc["action"] = "scan_uid";
+  doc["action"] = "submit_card";
   doc["uid"] = uid;
   
   String jsonString;
@@ -695,11 +700,18 @@ bool checkRegistrationMode() {
           registrationMode = true;
           addCardMode = false;
           registrationStep = "password_set";
+          
+          // Hiển thị thông báo từ API thay vì thông báo cố định
+          String message = doc["message"] | "Quet the hoac nhan # de bo qua";
           lcd.clear();
           lcd.setCursor(0, 0);
-          lcd.print("CHE DO DANG KY");
+          lcd.print("BUOC 2: THEM THE");
           lcd.setCursor(0, 1);
-          lcd.print("Quet the moi...");
+          lcd.print(message.substring(0, 16)); // Hiển thị phần đầu thông báo
+          
+          // Set timer để hiển thị nội dung thông báo còn lại
+          lcdMessageTimer = millis();
+          lcdMessageToggle = true;
         }
         http.end();
         return true;
@@ -822,6 +834,13 @@ void handleNormalModeInput(char key) {
   }
 }
 
+void handleCardScanInput(char key) {
+  if (key == '#' && registrationStep == "password_set") {
+    Serial.println("⏩ Skipping card scan by user request");
+    completeRegistrationWithoutUID();
+  }
+}
+
 // ✅ HÀM checkPasswordAndOpenLock()
 void checkPasswordAndOpenLock() {
   bool isValidPassword = false;
@@ -873,7 +892,7 @@ bool completeRegistrationWithoutUID() {
   http.setTimeout(10000);
 
   DynamicJsonDocument doc(1024);
-  doc["action"] = "complete_without_uid";
+  doc["action"] = "complete_without_card";
   
   String jsonString;
   serializeJson(doc, jsonString);
@@ -990,6 +1009,9 @@ void loop() {
     if (registrationMode && registrationStep == "password_input") {
       handleRegistrationPasswordInput(key);
     }
+    else if (registrationMode && registrationStep == "password_set") {
+      handleCardScanInput(key); // Thêm xử lý này
+    }
     else if (!registrationMode && !addCardMode) {
       handleNormalModeInput(key);
     }
@@ -1001,4 +1023,16 @@ void loop() {
   }
 
   handleRFIDScan();
+
+  if (registrationMode && registrationStep == "password_set" && (millis() - lcdMessageTimer > 3000)) {
+    lcdMessageTimer = millis();
+    lcdMessageToggle = !lcdMessageToggle;
+    
+    lcd.setCursor(0, 1);
+    if (lcdMessageToggle) {
+      lcd.print("Quet the moi...  ");
+    } else {
+      lcd.print("Nhan # de bo qua ");
+    }
+  }
 }
