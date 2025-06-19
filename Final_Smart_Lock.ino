@@ -13,7 +13,7 @@ const char* ssid = "MHEPro";
 const char* password_wifi = "0934752432";
 
 // API endpoints
-const char* api_base_url = "https://api-iot-v2-x3uv8v59j-hiens-projects-d1689d2e.vercel.app";
+const char* api_base_url = "https://api-iot-v2-narc5zc7q-hiens-projects-d1689d2e.vercel.app";
 const char* smart_lock_endpoint = "/api/smart-lock";
 const char* admin_endpoint = "/api/admin";
 
@@ -944,11 +944,10 @@ bool completeRegistrationWithoutUID() {
   if (WiFi.status() != WL_CONNECTED) return false;
   
   HTTPClient http;
-  // ✅ SỬA: Gọi admin endpoint thay vì smart-lock
   http.begin(String(api_base_url) + admin_endpoint);
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(10000);
-
+  http.setTimeout(15000); // ✅ Increase timeout
+  
   DynamicJsonDocument doc(1024);
   doc["action"] = "complete_without_card";
   
@@ -956,67 +955,94 @@ bool completeRegistrationWithoutUID() {
   serializeJson(doc, jsonString);
   
   Serial.println("📡 Completing registration without UID...");
-  Serial.println("Request: " + jsonString);
+  Serial.println("🔗 URL: " + String(api_base_url) + admin_endpoint);
+  Serial.println("📤 Request: " + jsonString);
+  Serial.println("🕐 Timeout: 15000ms");
   
   int httpResponseCode = http.POST(jsonString);
   
-  if (httpResponseCode == 200) {
+  Serial.println("📥 Response Code: " + String(httpResponseCode));
+  
+  if (httpResponseCode > 0) {
     String response = http.getString();
-    Serial.println("📡 Complete registration response: " + response);
+    Serial.println("📥 Response Body: " + response);
     
-    DynamicJsonDocument responseDoc(1024);
-    DeserializationError error = deserializeJson(responseDoc, response);
-    
-    if (error) {
-      Serial.println("❌ JSON parse error: " + String(error.c_str()));
-      http.end();
-      return false;
-    }
-    
-    bool success = responseDoc["success"] | false;
-    
-    if (success) {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Dang ky thanh cong!");
-      lcd.setCursor(0, 1);
-      String userName = responseDoc["user"]["name"] | "User";
-      lcd.print(userName.substring(0, 16));
+    if (httpResponseCode == 200) {
+      DynamicJsonDocument responseDoc(1024);
+      DeserializationError error = deserializeJson(responseDoc, response);
       
-      delay(3000);
+      if (error) {
+        Serial.println("❌ JSON parse error: " + String(error.c_str()));
+        http.end();
+        return false;
+      }
       
-      // ✅ Reset registration mode
-      registrationMode = false;
-      registrationStep = "waiting";
-      inputStarted = false;
-      input_pass = "";
+      bool success = responseDoc["success"] | false;
       
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Smart Lock Ready");
-      
-      http.end();
-      return true;
+      if (success) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Dang ky thanh cong!");
+        lcd.setCursor(0, 1);
+        String userName = responseDoc["user"]["name"] | "User";
+        lcd.print(userName.substring(0, 16));
+        
+        delay(3000);
+        
+        // Reset registration mode
+        registrationMode = false;
+        registrationStep = "waiting";
+        inputStarted = false;
+        input_pass = "";
+        
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Smart Lock Ready");
+        
+        http.end();
+        return true;
+      } else {
+        String errorMsg = responseDoc["error"] | "Unknown error";
+        String detail = responseDoc["detail"] | "";
+        
+        Serial.println("❌ API Error: " + errorMsg);
+        Serial.println("❌ Error Detail: " + detail);
+        
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("LOI DANG KY!");
+        lcd.setCursor(0, 1);
+        lcd.print(errorMsg.substring(0, 16));
+        delay(3000);
+      }
     } else {
+      // ✅ HANDLE SPECIFIC HTTP ERROR CODES
+      String response = http.getString();
+      Serial.println("❌ HTTP Error " + String(httpResponseCode) + ": " + response);
+      
       lcd.clear();
       lcd.setCursor(0, 0);
-      lcd.print("LOI DANG KY!");
+      if (httpResponseCode == 400) {
+        lcd.print("LOI THAM SO!");
+      } else if (httpResponseCode == 500) {
+        lcd.print("LOI SERVER!");
+      } else {
+        lcd.print("LOI HTTP: " + String(httpResponseCode));
+      }
       lcd.setCursor(0, 1);
-      String error = responseDoc["error"] | "Unknown error";
-      lcd.print(error.substring(0, 16));
-      delay(2000);
+      lcd.print("Thu lai sau...");
+      delay(3000);
     }
-    
   } else {
-    Serial.println("❌ Complete registration error: " + String(httpResponseCode));
+    Serial.println("❌ Network error: " + String(httpResponseCode));
+    Serial.println("❌ HTTP error: " + http.errorToString(httpResponseCode));
     
-    // ✅ THÊM: Hiển thị lỗi chi tiết
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("LOI HTTP: " + String(httpResponseCode));
+    lcd.print("LOI MANG!");
     lcd.setCursor(0, 1);
-    lcd.print("Thu lai sau...");
-    delay(2000);
+    lcd.print("Kiem tra WiFi...");
+    delay(3000);
   }
   
   http.end();
