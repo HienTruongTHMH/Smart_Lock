@@ -1,3 +1,4 @@
+import { Pool } from 'pg';
 import { setupCors, handleOptions } from './_cors.js';
 
 export default async function handler(req, res) {
@@ -9,11 +10,14 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  const { Pool } = require('pg');
-  
   if (!process.env.POSTGRES_URL) {
     return res.status(500).json({ error: 'Database connection not configured' });
   }
+
+  const pool = new Pool({
+    connectionString: process.env.POSTGRES_URL,
+    ssl: { rejectUnauthorized: false }
+  });
 
   // Global registration state
   let registrationState = {

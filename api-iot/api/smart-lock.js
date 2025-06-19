@@ -16,11 +16,9 @@ export default async function handler(req, res) {
   console.log('URL:', req.url);
   console.log('Query:', req.query);
   console.log('Body:', req.body);
-  console.log('Headers:', req.headers);
 
   // Get action from query params (GET) or body (POST)
   const action = req.method === 'GET' ? req.query.action : req.body?.action;
-
   console.log('📝 Action extracted:', action);
 
   if (!action) {
