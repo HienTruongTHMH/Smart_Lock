@@ -1,11 +1,24 @@
 import { Pool } from 'pg';
-import { setupCors, handleOptions } from './_cors.js';
+import { setupCors } from './_cors.js';
+
+// ✅ Định nghĩa state mặc định
+const defaultState = {
+  isActive: false,
+  step: 'waiting',
+  targetUserId: null,
+  userData: null,
+  password: null,
+  uid: null,
+  startTime: null,
+  message: null // Thêm message để hiển thị trên ESP32
+};
+
+// ✅ Sử dụng biến global (chỉ trong phiên hiện tại)
+let registrationState = { ...defaultState };
 
 export default async function handler(req, res) {
-  // ✅ Setup CORS
   setupCors(res);
   
-  // ✅ Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -14,23 +27,48 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Database connection not configured' });
   }
 
+  console.log('📝 Admin API Request:', req.method, req.body?.action || 'GET state');
+
   const pool = new Pool({
     connectionString: process.env.POSTGRES_URL,
     ssl: { rejectUnauthorized: false }
   });
 
-  // Global registration state
-  let registrationState = {
-    isActive: false,
-    step: 'waiting', // waiting, password_input, password_set, card_scan, add_card
-    targetUserId: null,
-    userData: null,
-    password: null,
-    uid: null,
-    startTime: null
-  };
+  let client;
 
   try {
+    // ✅ Get registration state from database
+    client = await pool.connect();
+    
+    // ✅ Create table if it doesn't exist
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "System_State" (
+        key TEXT PRIMARY KEY,
+        value JSONB NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // ✅ Load state from database
+    const stateResult = await client.query(
+      'SELECT value FROM "System_State" WHERE key = $1',
+      ['registration_state']
+    );
+    
+    if (stateResult.rows.length > 0) {
+      // State exists in database
+      registrationState = stateResult.rows[0].value;
+      console.log('✅ Loaded state from database:', registrationState);
+    } else {
+      // Initialize state in database
+      await client.query(
+        'INSERT INTO "System_State" (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2',
+        ['registration_state', JSON.stringify(registrationState)]
+      );
+      console.log('✅ Initialized default state in database');
+    }
+    
+    // Process the request
     if (req.method === 'GET') {
       // ESP32 kiểm tra trạng thái
       console.log('📥 ESP32 checking registration state:', registrationState);
@@ -39,38 +77,32 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const { action } = req.body;
-      console.log('📨 Admin API action:', action, req.body);
-
+      
       switch (action) {
-        // =================== USER REGISTRATION ===================
         case 'start_registration':
-          return await startRegistration(req, res, pool);
+          return await startRegistration(req, res, client);
         
-        case 'set_password':
-          return await setPassword(req, res, pool);
+        case 'cancel_registration':
+          return await cancelRegistration(req, res, client);
         
-        case 'scan_uid':
-          return await scanUID(req, res, pool);
-        
-        case 'complete_without_uid':
-          return await completeWithoutUID(req, res, pool);
-        
-        // =================== CARD MANAGEMENT ===================
         case 'start_add_card':
-          return await startAddCard(req, res, pool);
+          return await startAddCard(req, res, client);
         
         case 'cancel_add_card':
-          return cancelAddCard(req, res, pool);
+          return await cancelAddCard(req, res, client);
+          
+        // ✅ THÊM: Xử lý các actions từ ESP32
+        case 'submit_password':
+          return await setPassword(req, res, client);
+          
+        case 'submit_card':
+          return await scanUID(req, res, client);
+          
+        case 'complete_without_card':
+          return await completeWithoutUID(req, res, client);
         
-        // =================== GENERAL ===================
-        case 'cancel_registration':
-          return cancelRegistration(req, res, pool);
-        
-        case 'get_status':
-          return res.json(registrationState);
-
         default:
-          return res.status(400).json({ error: 'Invalid action: ' + action });
+          return res.status(400).json({ error: 'Invalid action' });
       }
     }
 
@@ -83,15 +115,19 @@ export default async function handler(req, res) {
       detail: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   } finally {
+    if (client) {
+      client.release();
+    }
     await pool.end();
   }
 }
 
 // =================== REGISTRATION FUNCTIONS ===================
 
-async function startRegistration(req, res, pool) {
+async function startRegistration(req, res, client) {
   console.log('🚀 Starting new user registration');
   
+  // ✅ SỬA: Update registrationState
   registrationState = {
     isActive: true,
     step: 'password_input',
@@ -99,8 +135,15 @@ async function startRegistration(req, res, pool) {
     userData: req.body.userData || null,
     password: null,
     uid: null,
-    startTime: Date.now()
+    startTime: Date.now(),
+    message: 'Vui lòng nhập mật khẩu 4 chữ số'
   };
+  
+  // ✅ THÊM: Lưu state vào database
+  await client.query(
+    'UPDATE "System_State" SET value = $1 WHERE key = $2',
+    [JSON.stringify(registrationState), 'registration_state']
+  );
   
   console.log('✅ Registration state updated:', registrationState);
   
@@ -111,7 +154,7 @@ async function startRegistration(req, res, pool) {
   });
 }
 
-async function setPassword(req, res, pool) {
+async function setPassword(req, res, client) {
   const { password } = req.body;
   
   if (!password || password.length !== 4) {
@@ -120,8 +163,38 @@ async function setPassword(req, res, pool) {
 
   console.log('🔐 Setting password for registration:', password);
   
+  // ✅ Kiểm tra password đã tồn tại
+  const existingPwd = await client.query(
+    'SELECT id_user FROM "Manager_Sign_In" WHERE private_pwd = $1',
+    [password]
+  );
+  
+  if (existingPwd.rows.length > 0) {
+    // ✅ Password đã tồn tại - báo lỗi
+    registrationState.message = 'Mật khẩu đã tồn tại, vui lòng thử mật khẩu khác';
+    
+    // ✅ THÊM: Lưu state vào database
+    await client.query(
+      'UPDATE "System_State" SET value = $1 WHERE key = $2',
+      [JSON.stringify(registrationState), 'registration_state']
+    );
+    
+    return res.json({ 
+      success: false, 
+      error: 'Password already exists',
+      message: 'Mật khẩu đã tồn tại, vui lòng thử mật khẩu khác'
+    });
+  }
+  
   registrationState.password = password;
   registrationState.step = 'password_set';
+  registrationState.message = 'Mật khẩu đã được nhận. Quét thẻ RFID hoặc nhấn # để bỏ qua';
+  
+  // ✅ THÊM: Lưu state vào database
+  await client.query(
+    'UPDATE "System_State" SET value = $1 WHERE key = $2',
+    [JSON.stringify(registrationState), 'registration_state']
+  );
   
   console.log('✅ Registration state updated:', registrationState);
   
@@ -132,7 +205,7 @@ async function setPassword(req, res, pool) {
   });
 }
 
-async function scanUID(req, res, pool) {
+async function scanUID(req, res, client) {
   const { uid } = req.body;
   
   if (!uid) {
@@ -141,13 +214,21 @@ async function scanUID(req, res, pool) {
 
   console.log('📡 UID scanned for registration:', uid);
   
-  // Check if UID already exists
-  const existingUser = await pool.query(
+  // ✅ Check if UID already exists
+  const existingUser = await client.query(
     'SELECT "Full_Name" FROM "Manager_Sign_In" WHERE "UID" = $1',
     [uid]
   );
 
   if (existingUser.rows.length > 0) {
+    registrationState.message = 'Thẻ đã được sử dụng bởi người dùng khác';
+    
+    // ✅ THÊM: Lưu state vào database
+    await client.query(
+      'UPDATE "System_State" SET value = $1 WHERE key = $2',
+      [JSON.stringify(registrationState), 'registration_state']
+    );
+    
     return res.status(400).json({ 
       error: 'Card already assigned to: ' + existingUser.rows[0].Full_Name 
     });
@@ -155,27 +236,36 @@ async function scanUID(req, res, pool) {
   
   registrationState.uid = uid;
   
+  // ✅ THÊM: Lưu state vào database
+  await client.query(
+    'UPDATE "System_State" SET value = $1 WHERE key = $2',
+    [JSON.stringify(registrationState), 'registration_state']
+  );
+  
   // Complete registration
-  return await completeRegistration(res, pool);
+  return await completeRegistration(req, res, client);
 }
 
-async function completeWithoutUID(req, res, pool) {
+async function completeWithoutUID(req, res, client) {
   console.log('📝 Completing registration without UID');
   
   registrationState.uid = null;
   
-  return await completeRegistration(res, pool);
+  // ✅ THÊM: Lưu state vào database
+  await client.query(
+    'UPDATE "System_State" SET value = $1 WHERE key = $2',
+    [JSON.stringify(registrationState), 'registration_state']
+  );
+  
+  return await completeRegistration(req, res, client);
 }
 
-async function completeRegistration(res, pool) {
+async function completeRegistration(req, res, client) {
   if (!registrationState.password) {
     return res.status(400).json({ error: 'Password not set' });
   }
 
-  let client;
   try {
-    client = await pool.connect();
-    
     // Generate user ID
     const userIdResult = await client.query('SELECT COALESCE(MAX(id_user), 0) + 1 as next_id FROM "Manager_Sign_In"');
     const newUserId = userIdResult.rows[0].next_id;
@@ -200,10 +290,15 @@ async function completeRegistration(res, pool) {
       userData: null,
       password: null,
       uid: null,
-      startTime: null
+      startTime: null,
+      message: 'Đăng ký thành công'
     };
     
-    client.release();
+    // ✅ THÊM: Lưu state vào database
+    await client.query(
+      'UPDATE "System_State" SET value = $1 WHERE key = $2',
+      [JSON.stringify(registrationState), 'registration_state']
+    );
     
     return res.json({
       success: true,
@@ -216,7 +311,6 @@ async function completeRegistration(res, pool) {
     });
   } catch (error) {
     console.error('❌ Complete registration error:', error);
-    if (client) client.release();
     return res.status(500).json({ 
       error: 'Failed to complete registration', 
       detail: error.message 
@@ -226,7 +320,7 @@ async function completeRegistration(res, pool) {
 
 // =================== CARD MANAGEMENT ===================
 
-async function startAddCard(req, res, pool) {
+async function startAddCard(req, res, client) {
   const { targetUserId } = req.body;
   
   if (!targetUserId) {
@@ -234,7 +328,7 @@ async function startAddCard(req, res, pool) {
   }
 
   // Verify user exists
-  const userCheck = await pool.query(
+  const userCheck = await client.query(
     'SELECT * FROM "Manager_Sign_In" WHERE id_user = $1',
     [targetUserId]
   );
@@ -258,8 +352,15 @@ async function startAddCard(req, res, pool) {
     userData: user,
     password: null,
     uid: null,
-    startTime: Date.now()
+    startTime: Date.now(),
+    message: 'Quét thẻ RFID để gán cho ' + user.Full_Name
   };
+  
+  // ✅ THÊM: Lưu state vào database
+  await client.query(
+    'UPDATE "System_State" SET value = $1 WHERE key = $2',
+    [JSON.stringify(registrationState), 'registration_state']
+  );
   
   console.log('✅ Add card state set:', registrationState);
   
@@ -271,7 +372,7 @@ async function startAddCard(req, res, pool) {
   });
 }
 
-async function cancelAddCard(req, res, pool) {
+async function cancelAddCard(req, res, client) {
   console.log('❌ Add Card mode cancelled');
   
   registrationState = {
@@ -281,8 +382,15 @@ async function cancelAddCard(req, res, pool) {
     userData: null,
     password: null,
     uid: null,
-    startTime: null
+    startTime: null,
+    message: 'Thêm thẻ đã bị hủy'
   };
+  
+  // ✅ THÊM: Lưu state vào database
+  await client.query(
+    'UPDATE "System_State" SET value = $1 WHERE key = $2',
+    [JSON.stringify(registrationState), 'registration_state']
+  );
   
   return res.json({ 
     success: true, 
@@ -293,7 +401,7 @@ async function cancelAddCard(req, res, pool) {
 
 // =================== GENERAL ===================
 
-async function cancelRegistration(req, res, pool) {
+async function cancelRegistration(req, res, client) {
   console.log('❌ Registration cancelled');
   
   registrationState = {
@@ -303,8 +411,15 @@ async function cancelRegistration(req, res, pool) {
     userData: null,
     password: null,
     uid: null,
-    startTime: null
+    startTime: null,
+    message: 'Đăng ký đã bị hủy'
   };
+  
+  // ✅ THÊM: Lưu state vào database
+  await client.query(
+    'UPDATE "System_State" SET value = $1 WHERE key = $2',
+    [JSON.stringify(registrationState), 'registration_state']
+  );
   
   return res.json({ 
     success: true, 

@@ -93,10 +93,7 @@ export default async function handler(req, res) {
       console.log('👤 Adding sample users...');
       await client.query(`
         INSERT INTO "Manager_Sign_In" ("Full_Name", private_pwd, "UID") VALUES 
-        ('Hien Truong', '1234', '67A21405'),
-        ('Admin User', '0000', NULL),
-        ('Test User', '9999', 'ABC12345'),
-        ('Manager Demo', '5555', NULL)
+        ('Test User', '9999', 'ABC12345')
       `);
       console.log('✅ Sample users created');
     }

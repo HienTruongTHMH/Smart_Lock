@@ -73,6 +73,10 @@ export default async function handler(req, res) {
         console.log('📡 Processing check_uid action');
         return await checkUID(req, res, client);
       
+      case 'process_registration':
+        console.log('🔐 Processing registration input from ESP32');
+        return await processRegistration(req, res, client);
+      
       // =================== ACCESS LOGGING ===================
       case 'log_access':
         console.log('📝 Processing log_access action');
@@ -254,25 +258,16 @@ async function getUsers(req, res, client) {
   console.log('📋 === GET USERS FUNCTION ===');
   
   try {
-    // ✅ KIỂM TRA BẢNG TỒN TẠI
-    const tableCheck = await client.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = 'Manager_Sign_In'
-      );
-    `);
+    // ✅ THÊM LOGS DETAIL DEBUGGING
+    console.log('🔍 POSTGRES_URL:', process.env.POSTGRES_URL ? 'Exists (masked)' : 'Missing');
     
-    if (!tableCheck.rows[0].exists) {
-      console.error('❌ Table Manager_Sign_In does not exist');
-      return res.status(500).json({ 
-        error: 'Database not initialized',
-        detail: 'Manager_Sign_In table not found. Run setup-database first.'
-      });
-    }
+    // Kiểm tra kết nối database
+    const testQuery = await client.query('SELECT NOW() as time');
+    console.log('✅ Database connection works, time:', testQuery.rows[0].time);
     
-    // ✅ QUERY THEO CẤU TRÚC GỐC (KHÔNG CÓ created_at)
-    console.log('✅ Querying user data with original structure...');
+    // ✅ KIỂM TRA SQL QUERY
+    console.log('🔍 Running query: SELECT * FROM "Manager_Sign_In"');
+    
     const result = await client.query(`
       SELECT 
         id_user, 
@@ -283,27 +278,29 @@ async function getUsers(req, res, client) {
       ORDER BY "Full_Name"
     `);
     
-    console.log(`✅ Found ${result.rows.length} users`);
+    console.log(`✅ Query returned ${result.rows.length} rows`);
+    console.log('📊 First row sample:', result.rows[0] || 'No rows');
     
-    const response = { 
-      success: true, 
-      users: result.rows.map(user => ({
-        id: user.id_user,
-        name: user.Full_Name,
-        uid: user.UID || null,
-        hasPassword: !!user.private_pwd,
-        createdAt: null // Không có trong cấu trúc gốc
-      }))
-    };
+    // ✅ CHUYỂN ĐỔI ĐÚNG ĐỊNH DẠNG
+    const users = result.rows.map(user => ({
+      id: user.id_user,
+      name: user.Full_Name,
+      uid: user.UID || null,
+      hasPassword: !!user.private_pwd,
+      createdAt: null // Không có trong cấu trúc gốc
+    }));
     
-    console.log('📤 Sending response with users:', response.users.length);
-    return res.json(response);
+    console.log('📤 Mapped users array:', users.length, 'items');
+    console.log('📤 First mapped user:', users[0] || 'No users');
+    
+    return res.json({ success: true, users: users });
     
   } catch (error) {
     console.error('❌ Get users error:', error);
     return res.status(500).json({ 
       error: 'Failed to get users', 
-      detail: error.message 
+      detail: error.message,
+      stack: error.stack
     });
   }
 }
@@ -483,6 +480,307 @@ async function testConnection(req, res, client) {
       success: false,
       error: 'Database test failed', 
       detail: error.message 
+    });
+  }
+}
+
+// =================== REGISTRATION PROCESSING ===================
+
+async function processRegistration(req, res, client) {
+  const { type, value } = req.body;
+  
+  if (!type || !value) {
+    return res.status(400).json({ error: 'Type and value are required' });
+  }
+  
+  // Load current registration state
+  const stateResult = await client.query(
+    'SELECT value FROM "System_State" WHERE key = $1',
+    ['registration_state']
+  );
+  
+  if (stateResult.rows.length === 0 || !stateResult.rows[0].value.isActive) {
+    return res.json({
+      success: false,
+      error: 'No active registration'
+    });
+  }
+  
+  const registrationState = stateResult.rows[0].value;
+  console.log('📊 Current registration state:', registrationState);
+  
+  // Process based on input type and current state
+  if (type === 'password' && registrationState.step === 'password_input') {
+    // Submit password
+    console.log('🔐 Password received from ESP32:', value);
+    
+    // Call admin API to set password
+    await client.query('BEGIN');
+    
+    try {
+      // Check if password exists
+      const existingPwd = await client.query(
+        'SELECT id_user FROM "Manager_Sign_In" WHERE private_pwd = $1',
+        [value]
+      );
+      
+      if (existingPwd.rows.length > 0) {
+        // Password already exists
+        registrationState.message = 'Mật khẩu đã tồn tại, vui lòng thử lại';
+        
+        await client.query(
+          'UPDATE "System_State" SET value = $1 WHERE key = $2',
+          [JSON.stringify(registrationState), 'registration_state']
+        );
+        
+        await client.query('COMMIT');
+        
+        return res.json({
+          success: false,
+          error: 'Password already exists',
+          message: 'Mật khẩu đã tồn tại, vui lòng thử lại'
+        });
+      }
+      
+      // Password is unique, update state
+      registrationState.password = value;
+      registrationState.step = 'password_set';
+      registrationState.message = 'Mật khẩu đã được nhận. Quét thẻ RFID hoặc nhấn # để bỏ qua';
+      
+      await client.query(
+        'UPDATE "System_State" SET value = $1 WHERE key = $2',
+        [JSON.stringify(registrationState), 'registration_state']
+      );
+      
+      await client.query('COMMIT');
+      
+      return res.json({
+        success: true,
+        message: 'Password accepted',
+        nextStep: 'card_scan_optional'
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  } 
+  else if (type === 'card' && registrationState.step === 'password_set') {
+    // Submit card for registration
+    console.log('🎫 Card received from ESP32:', value);
+    
+    // Call admin API to set card
+    await client.query('BEGIN');
+    
+    try {
+      // Check if card exists
+      const existingCard = await client.query(
+        'SELECT "Full_Name" FROM "Manager_Sign_In" WHERE "UID" = $1',
+        [value]
+      );
+      
+      if (existingCard.rows.length > 0) {
+        // Card already exists
+        registrationState.message = 'Thẻ đã tồn tại, vui lòng thử thẻ khác';
+        
+        await client.query(
+          'UPDATE "System_State" SET value = $1 WHERE key = $2',
+          [JSON.stringify(registrationState), 'registration_state']
+        );
+        
+        await client.query('COMMIT');
+        
+        return res.json({
+          success: false,
+          error: 'Card already exists',
+          cardOwner: existingCard.rows[0].Full_Name
+        });
+      }
+      
+      // Card is unique, update state and complete registration
+      registrationState.uid = value;
+      
+      // Generate user ID
+      const userIdResult = await client.query(
+        'SELECT COALESCE(MAX(id_user), 0) + 1 as next_id FROM "Manager_Sign_In"'
+      );
+      const newUserId = userIdResult.rows[0].next_id;
+      
+      // Generate name - use provided name or auto-generate
+      const userName = registrationState.userData?.fullName || `User${String(newUserId).padStart(3, '0')}`;
+      
+      // Insert new user
+      const insertResult = await client.query(
+        `INSERT INTO "Manager_Sign_In" (id_user, "Full_Name", private_pwd, "UID") 
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [newUserId, userName, registrationState.password, value]
+      );
+      
+      // Reset state
+      registrationState = {
+        isActive: false,
+        step: 'waiting',
+        targetUserId: null,
+        userData: null,
+        password: null,
+        uid: null,
+        startTime: null,
+        message: 'Đăng ký thành công'
+      };
+      
+      await client.query(
+        'UPDATE "System_State" SET value = $1 WHERE key = $2',
+        [JSON.stringify(registrationState), 'registration_state']
+      );
+      
+      await client.query('COMMIT');
+      
+      return res.json({
+        success: true,
+        message: 'Registration completed successfully',
+        user: {
+          id: insertResult.rows[0].id_user,
+          name: insertResult.rows[0].Full_Name
+        }
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  }
+  else if (type === 'skip_card' && registrationState.step === 'password_set') {
+    // Skip card scan and complete registration without card
+    console.log('⏩ Skipping card scan, completing registration');
+    
+    await client.query('BEGIN');
+    
+    try {
+      // Generate user ID
+      const userIdResult = await client.query(
+        'SELECT COALESCE(MAX(id_user), 0) + 1 as next_id FROM "Manager_Sign_In"'
+      );
+      const newUserId = userIdResult.rows[0].next_id;
+      
+      // Generate name - use provided name or auto-generate
+      const userName = registrationState.userData?.fullName || `User${String(newUserId).padStart(3, '0')}`;
+      
+      // Insert new user without card
+      const insertResult = await client.query(
+        `INSERT INTO "Manager_Sign_In" (id_user, "Full_Name", private_pwd) 
+         VALUES ($1, $2, $3) RETURNING *`,
+        [newUserId, userName, registrationState.password]
+      );
+      
+      // Reset state
+      registrationState = {
+        isActive: false,
+        step: 'waiting',
+        targetUserId: null,
+        userData: null,
+        password: null,
+        uid: null,
+        startTime: null,
+        message: 'Đăng ký thành công không có thẻ'
+      };
+      
+      await client.query(
+        'UPDATE "System_State" SET value = $1 WHERE key = $2',
+        [JSON.stringify(registrationState), 'registration_state']
+      );
+      
+      await client.query('COMMIT');
+      
+      return res.json({
+        success: true,
+        message: 'Registration completed without card',
+        user: {
+          id: insertResult.rows[0].id_user,
+          name: insertResult.rows[0].Full_Name
+        }
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  }
+  else if (type === 'card' && registrationState.step === 'add_card') {
+    // Add card to existing user
+    console.log('🎫 Card received for existing user:', value);
+    
+    await client.query('BEGIN');
+    
+    try {
+      // Check if card exists
+      const existingCard = await client.query(
+        'SELECT "Full_Name" FROM "Manager_Sign_In" WHERE "UID" = $1',
+        [value]
+      );
+      
+      if (existingCard.rows.length > 0) {
+        // Card already exists
+        registrationState.message = 'Thẻ đã tồn tại, vui lòng thử thẻ khác';
+        
+        await client.query(
+          'UPDATE "System_State" SET value = $1 WHERE key = $2',
+          [JSON.stringify(registrationState), 'registration_state']
+        );
+        
+        await client.query('COMMIT');
+        
+        return res.json({
+          success: false,
+          error: 'Card already exists',
+          cardOwner: existingCard.rows[0].Full_Name
+        });
+      }
+      
+      // Update user with new card
+      const updateResult = await client.query(
+        'UPDATE "Manager_Sign_In" SET "UID" = $1 WHERE id_user = $2 RETURNING *',
+        [value, registrationState.targetUserId]
+      );
+      
+      if (updateResult.rows.length === 0) {
+        throw new Error('User not found');
+      }
+      
+      // Reset state
+      registrationState = {
+        isActive: false,
+        step: 'waiting',
+        targetUserId: null,
+        userData: null,
+        password: null,
+        uid: null,
+        startTime: null,
+        message: 'Thêm thẻ thành công'
+      };
+      
+      await client.query(
+        'UPDATE "System_State" SET value = $1 WHERE key = $2',
+        [JSON.stringify(registrationState), 'registration_state']
+      );
+      
+      await client.query('COMMIT');
+      
+      return res.json({
+        success: true,
+        message: 'Card added successfully',
+        user: {
+          id: updateResult.rows[0].id_user,
+          name: updateResult.rows[0].Full_Name
+        }
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  }
+  else {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid input type or state',
+      currentState: registrationState.step,
+      inputType: type
     });
   }
 }
