@@ -528,7 +528,7 @@ bool sendPasswordToAPI(String password) {
   http.setTimeout(10000);
 
   DynamicJsonDocument doc(1024);
-  doc["action"] = "set_password";
+  doc["action"] = "submit_password"; // ✅ SỬA: từ "set_password" thành "submit_password"
   doc["password"] = password;
   
   String jsonString;
@@ -543,6 +543,30 @@ bool sendPasswordToAPI(String password) {
     String response = http.getString();
     Serial.println("📡 Password API response: " + response);
     
+    // Phân tích response để kiểm tra thành công hay thất bại
+    DynamicJsonDocument responseDoc(1024);
+    DeserializationError error = deserializeJson(responseDoc, response);
+    
+    if (error) {
+      Serial.println("❌ JSON parse error: " + String(error.c_str()));
+      return false;
+    }
+    
+    bool success = responseDoc["success"] | false;
+    String message = responseDoc["message"] | "";
+    
+    if (!success) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("LOI MAT KHAU!");
+      lcd.setCursor(0, 1);
+      lcd.print(message.substring(0, 16));
+      Serial.println("❌ Password error: " + message);
+      delay(2000);
+      return false;
+    }
+    
+    // Success case
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("Mat khau da luu!");
