@@ -1,10 +1,9 @@
-const { Pool } = require('pg');
+import { Pool } = require('pg');
+import { setupCors, handleOptions } from './_cors.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
+  setupCors(res);
+  
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
