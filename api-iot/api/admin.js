@@ -218,6 +218,29 @@ async function scanUID(req, res, client) {
 
   console.log('📡 UID scanned for registration:', uid);
   
+  // ✅ Load current state from database
+  const stateResult = await client.query(
+    'SELECT value FROM "System_State" WHERE key = $1',
+    ['registration_state']
+  );
+  
+  if (stateResult.rows.length === 0) {
+    return res.status(400).json({ 
+      success: false,
+      error: 'No active registration' 
+    });
+  }
+  
+  let currentState = stateResult.rows[0].value;
+  
+  if (!currentState.isActive || currentState.step !== 'password_set') {
+    return res.status(400).json({ 
+      success: false,
+      error: 'Invalid state for card scan',
+      currentState: currentState
+    });
+  }
+  
   // ✅ Check if UID already exists
   const existingUser = await client.query(
     'SELECT "Full_Name" FROM "Manager_Sign_In" WHERE "UID" = $1',
@@ -225,29 +248,71 @@ async function scanUID(req, res, client) {
   );
 
   if (existingUser.rows.length > 0) {
-    registrationState.message = 'Thẻ đã được sử dụng bởi người dùng khác';
-    
-    // ✅ THÊM: Lưu state vào database
-    await client.query(
-      'UPDATE "System_State" SET value = $1 WHERE key = $2',
-      [JSON.stringify(registrationState), 'registration_state']
-    );
-    
     return res.status(400).json({ 
+      success: false,
       error: 'Card already assigned to: ' + existingUser.rows[0].Full_Name 
     });
   }
   
-  registrationState.uid = uid;
+  // ✅ Complete registration with card
+  await client.query('BEGIN');
   
-  // ✅ THÊM: Lưu state vào database
-  await client.query(
-    'UPDATE "System_State" SET value = $1 WHERE key = $2',
-    [JSON.stringify(registrationState), 'registration_state']
-  );
-  
-  // Complete registration
-  return await completeRegistration(req, res, client);
+  try {
+    // Generate user ID
+    const userIdResult = await client.query(
+      'SELECT COALESCE(MAX(id_user), 0) + 1 as next_id FROM "Manager_Sign_In"'
+    );
+    const newUserId = userIdResult.rows[0].next_id;
+    
+    // Generate name
+    const userName = currentState.userData?.fullName || `User${String(newUserId).padStart(3, '0')}`;
+    
+    // Insert new user with card
+    const insertResult = await client.query(
+      `INSERT INTO "Manager_Sign_In" (id_user, "Full_Name", private_pwd, "UID") 
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [newUserId, userName, currentState.password, uid]
+    );
+    
+    // Reset state
+    const resetState = {
+      isActive: false,
+      step: 'waiting',
+      targetUserId: null,
+      userData: null,
+      password: null,
+      uid: null,
+      startTime: null,
+      message: 'Đăng ký thành công với thẻ'
+    };
+    
+    await client.query(
+      'UPDATE "System_State" SET value = $1 WHERE key = $2',
+      [JSON.stringify(resetState), 'registration_state']
+    );
+    
+    await client.query('COMMIT');
+    
+    console.log('✅ Registration completed with card for:', userName);
+    
+    return res.json({
+      success: true,
+      message: 'Registration completed with card',
+      user: {
+        id: insertResult.rows[0].id_user,
+        name: insertResult.rows[0].Full_Name,
+        uid: insertResult.rows[0].UID
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('❌ Complete registration with card error:', error);
+    return res.status(500).json({ 
+      success: false,
+      error: 'Failed to complete registration', 
+      detail: error.message 
+    });
+  }
 }
 
 async function completeWithoutUID(req, res, client) {
@@ -266,17 +331,17 @@ async function completeWithoutUID(req, res, client) {
     });
   }
   
-  let registrationState = stateResult.rows[0].value;
+  let currentState = stateResult.rows[0].value;
   
-  if (!registrationState.isActive || registrationState.step !== 'password_set') {
+  if (!currentState.isActive || currentState.step !== 'password_set') {
     return res.status(400).json({ 
       success: false,
-      error: 'Invalid state for completion',
-      currentState: registrationState
+      error: 'Invalid state for completion. Current step: ' + currentState.step,
+      currentState: currentState
     });
   }
   
-  if (!registrationState.password) {
+  if (!currentState.password) {
     return res.status(400).json({ 
       success: false,
       error: 'Password not set' 
@@ -293,17 +358,17 @@ async function completeWithoutUID(req, res, client) {
     const newUserId = userIdResult.rows[0].next_id;
     
     // Generate name - use provided name or auto-generate
-    const userName = registrationState.userData?.fullName || `User${String(newUserId).padStart(3, '0')}`;
+    const userName = currentState.userData?.fullName || `User${String(newUserId).padStart(3, '0')}`;
     
     // Insert new user without card
     const insertResult = await client.query(
       `INSERT INTO "Manager_Sign_In" (id_user, "Full_Name", private_pwd) 
        VALUES ($1, $2, $3) RETURNING *`,
-      [newUserId, userName, registrationState.password]
+      [newUserId, userName, currentState.password]
     );
     
     // Reset state
-    registrationState = {
+    const resetState = {
       isActive: false,
       step: 'waiting',
       targetUserId: null,
@@ -316,7 +381,7 @@ async function completeWithoutUID(req, res, client) {
     
     await client.query(
       'UPDATE "System_State" SET value = $1 WHERE key = $2',
-      [JSON.stringify(registrationState), 'registration_state']
+      [JSON.stringify(resetState), 'registration_state']
     );
     
     await client.query('COMMIT');
