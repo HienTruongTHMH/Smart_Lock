@@ -32,6 +32,10 @@
                 <button onclick="testDatabaseConnection()" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">
                     🔗 Test Database Connection
                 </button>
+                <!-- ✅ THÊM: Reset State Button -->
+                <button onclick="resetState()" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
+                    🔄 Reset State
+                </button>
                 <div id="connectionResult" class="mt-2 text-sm"></div>
             </div>
         </div>
@@ -456,7 +460,33 @@
                 console.error('Error canceling registration:', error);
             }
         }
-
+        // =================== RESET STATE ===================
+        async function resetState() {
+            if (!confirm('Bạn có chắc muốn reset state? Điều này sẽ hủy tất cả các hoạt động đang thực hiện.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(ADMIN_API, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'reset_state' })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('connectionResult').innerHTML = 
+                        '<div class="text-green-600">✅ State reset thành công!</div>';
+                } else {
+                    document.getElementById('connectionResult').innerHTML = 
+                        '<div class="text-red-600">❌ Reset thất bại: ' + (data.error || 'Unknown error') + '</div>';
+                }
+            } catch (error) {
+                document.getElementById('connectionResult').innerHTML = 
+                    '<div class="text-red-600">❌ Lỗi kết nối: ' + error.message + '</div>';
+            }
+        }
         // =================== ADD CARD ===================
         async function loadUsersWithoutCards() {
             try {

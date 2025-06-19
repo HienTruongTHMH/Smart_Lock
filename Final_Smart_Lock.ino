@@ -661,84 +661,101 @@ bool checkRegistrationMode() {
     
     Serial.println("📊 Registration state - isActive: " + String(isActive) + ", step: " + step);
     
-    if (isActive) {
-      if (step == "add_card") {
-        if (!addCardMode) {
-          Serial.println("✅ Entering Add Card mode");
-          addCardMode = true;
-          registrationMode = false;
-          registrationStep = "waiting";
-          targetUserId = doc["targetUserId"] | "";
-          addCardStartTime = millis();
-          
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print("CHE DO THEM THE");
-          lcd.setCursor(0, 1);
-          lcd.print("Quet the moi...");
-        }
-        http.end();
-        return true;
-      }
-      else if (step == "password_input") {
-        if (!registrationMode || registrationStep != "password_input") {
-          Serial.println("✅ Entering password input mode");
-          registrationMode = true;
-          addCardMode = false;
-          registrationStep = "password_input";
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print("CHE DO DANG KY");
-          lcd.setCursor(0, 1);
-          lcd.print("Nhap mat khau:");
-          inputStarted = false;
-          input_pass = "";
-        }
-        http.end();
-        return true;
-      } else if (step == "password_set") {
-        if (!registrationMode || registrationStep != "password_set") {
-          Serial.println("✅ Entering card scanning mode");
-          registrationMode = true;
-          addCardMode = false;
-          registrationStep = "password_set";
-          
-          // Hiển thị thông báo từ API thay vì thông báo cố định
-          String message = doc["message"] | "Quet the hoac nhan # de bo qua";
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print("BUOC 2: THEM THE");
-          lcd.setCursor(0, 1);
-          lcd.print(message.substring(0, 16)); // Hiển thị phần đầu thông báo
-          
-          // Set timer để hiển thị nội dung thông báo còn lại
-          lcdMessageTimer = millis();
-          lcdMessageToggle = true;
-        }
-        http.end();
-        return true;
-      }
-    } else {
+    // ✅ SỬA: Kiểm tra nếu không active thì thoát khỏi tất cả modes
+    if (!isActive) {
       if (registrationMode || addCardMode) {
-        Serial.println("✅ Exiting all special modes");
+        Serial.println("✅ Exiting all special modes - API says not active");
         registrationMode = false;
         addCardMode = false;
         registrationStep = "waiting";
         targetUserId = "";
+        inputStarted = false;
+        input_pass = "";
+        
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print("Smart Lock Ready");
+      }
+      http.end();
+      return false; // ✅ QUAN TRỌNG: Return false khi không active
+    }
+    
+    // ✅ Chỉ xử lý khi isActive = true
+    if (step == "add_card") {
+      if (!addCardMode) {
+        Serial.println("✅ Entering Add Card mode");
+        addCardMode = true;
+        registrationMode = false;
+        registrationStep = "waiting";
+        targetUserId = doc["targetUserId"] | "";
+        addCardStartTime = millis();
+        
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("CHE DO THEM THE");
+        lcd.setCursor(0, 1);
+        lcd.print("Quet the moi...");
+      }
+    }
+    else if (step == "password_input") {
+      if (!registrationMode || registrationStep != "password_input") {
+        Serial.println("✅ Entering password input mode");
+        registrationMode = true;
+        addCardMode = false;
+        registrationStep = "password_input";
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("CHE DO DANG KY");
+        lcd.setCursor(0, 1);
+        lcd.print("Nhap mat khau:");
         inputStarted = false;
         input_pass = "";
       }
+    } 
+    else if (step == "password_set") {
+      if (!registrationMode || registrationStep != "password_set") {
+        Serial.println("✅ Entering card scanning mode");
+        registrationMode = true;
+        addCardMode = false;
+        registrationStep = "password_set";
+        
+        // Hiển thị thông báo từ API
+        String message = doc["message"] | "Quet the hoac nhan # de bo qua";
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("BUOC 2: THEM THE");
+        lcd.setCursor(0, 1);
+        lcd.print(message.substring(0, 16));
+        
+        // Set timer để hiển thị nội dung thông báo còn lại
+        lcdMessageTimer = millis();
+        lcdMessageToggle = true;
+      }
     }
+    
+    http.end();
+    return (registrationMode || addCardMode);
+    
   } else {
     Serial.println("❌ HTTP error: " + String(httpResponseCode));
+    // ✅ THÊM: Reset modes khi có lỗi network
+    if (registrationMode || addCardMode) {
+      Serial.println("⚠️ Network error - resetting modes");
+      registrationMode = false;
+      addCardMode = false;
+      registrationStep = "waiting";
+      targetUserId = "";
+      
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Smart Lock Ready");
+    }
   }
   
   http.end();
-  return (registrationMode || addCardMode);
+  return false; // ✅ Return false khi có lỗi
 }
+
 
 // =================== INPUT HANDLERS ===================
 
@@ -1024,8 +1041,7 @@ void loop() {
   // Xử lý quét thẻ RFID - chức năng chính
   handleRFIDScan();
 
-  // 2. HIỂN THỊ THỜI GIAN KHI Ở CHẾ ĐỘ CHỜ
-  // Hiển thị thời gian và ngày tháng khi ở chế độ chờ (normal mode)
+  // 2. ✅ SỬA: HIỂN THỊ THỜI GIAN CHỈ KHI Ở CHẾ ĐỘ NORMAL
   if (!registrationMode && !addCardMode && !inputStarted && 
       millis() - lastTimeDisplay > TIME_DISPLAY_INTERVAL) {
     
@@ -1044,15 +1060,13 @@ void loop() {
     lastTimeDisplay = millis();
   }
   
-  // 3. CHECK REGISTRATION MODE - Chỉ khi cần thiết
+  // 3. ✅ SỬA: CHECK REGISTRATION MODE - Ưu tiên thấp hơn
   if (millis() - lastModeCheck > MODE_CHECK_INTERVAL) {
-    // Check xem có yêu cầu đăng ký/thêm thẻ từ web interface không
     checkRegistrationMode();
     lastModeCheck = millis();
   }
 
-  // 4. CÁC HIỂN THỊ KHÁC CHỈ KHI Ở CHẾ ĐỘ REGISTRATION
-  // Toggle message chỉ khi ở chế độ đăng ký
+  // 4. ✅ SỬA: Toggle message chỉ khi cần thiết
   if (registrationMode && registrationStep == "password_set" && 
       (millis() - lcdMessageTimer > 3000)) {
     lcdMessageTimer = millis();
