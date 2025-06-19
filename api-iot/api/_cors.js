@@ -1,6 +1,6 @@
 export function setupCors(res) {
   // ✅ SỬA: Cho phép tất cả origins hoặc specific domain
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', 'https://smart-lock-by-git.vercel.app/');
   // ✅ Hoặc specific domain nếu muốn bảo mật hơn:
   // res.setHeader('Access-Control-Allow-Origin', 'https://smart-lock-by-git.vercel.app');
   
