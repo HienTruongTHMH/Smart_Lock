@@ -2,11 +2,17 @@ export function setupCors(res) {
   // Đảm bảo CORS headers luôn được set đúng
   res.setHeader('Access-Control-Allow-Origin', 'https://smart-lock-by-git.vercel.app');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'false');
+  res.setHeader('Access-Control-Max-Age', '86400');
   
-  // Debug
-  console.log('✅ CORS headers set for origin: https://smart-lock-by-git.vercel.app');
+  // ✅ THÊM: Cho phép preflight requests
+  if (res.method === 'OPTIONS') {
+    res.status(200).end();
+    return true;
+  }
+  
+  return false;
 }
 
 export function handleOptions(req, res) {

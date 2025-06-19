@@ -17,17 +17,26 @@ const defaultState = {
 let registrationState = { ...defaultState };
 
 export default async function handler(req, res) {
+  // ✅ SỬA: Xử lý CORS trước tiên
   setupCors(res);
   
+  // ✅ SỬA: Handle OPTIONS request properly
   if (req.method === 'OPTIONS') {
+    console.log('🔄 Handling CORS preflight request');
     return res.status(200).end();
   }
 
-  if (!process.env.POSTGRES_URL) {
-    return res.status(500).json({ error: 'Database connection not configured' });
-  }
+  console.log('📝 Admin API Request:', req.method, req.url);
+  console.log('📝 Request body:', req.body);
+  console.log('📝 Request headers origin:', req.headers.origin);
 
-  console.log('📝 Admin API Request:', req.method, req.body?.action || 'GET state');
+  if (!process.env.POSTGRES_URL) {
+    console.error('❌ POSTGRES_URL not configured');
+    return res.status(500).json({ 
+      error: 'Database connection not configured',
+      timestamp: new Date().toISOString()
+    });
+  }
 
   const pool = new Pool({
     connectionString: process.env.POSTGRES_URL,
@@ -38,6 +47,7 @@ export default async function handler(req, res) {
 
   try {
     client = await pool.connect();
+    console.log('✅ Database connected successfully');
     
     // ✅ Create table if it doesn't exist
     await client.query(`
@@ -48,7 +58,7 @@ export default async function handler(req, res) {
       )
     `);
     
-    // ✅ SỬA: Load state với error handling tốt hơn
+    // Load and validate state
     let registrationState = { ...defaultState };
     
     try {
@@ -60,10 +70,9 @@ export default async function handler(req, res) {
       if (stateResult.rows.length > 0) {
         const loadedState = stateResult.rows[0].value;
         
-        // ✅ VALIDATE state structure
         if (loadedState && typeof loadedState === 'object') {
           registrationState = {
-            isActive: loadedState.isActive || false,
+            isActive: Boolean(loadedState.isActive),
             step: loadedState.step || 'waiting',
             targetUserId: loadedState.targetUserId || null,
             userData: loadedState.userData || null,
@@ -72,7 +81,7 @@ export default async function handler(req, res) {
             startTime: loadedState.startTime || null,
             message: loadedState.message || null
           };
-          console.log('✅ Loaded and validated state from database:', registrationState);
+          console.log('✅ Loaded state from database:', registrationState);
         } else {
           console.log('⚠️ Invalid state structure, using default');
           registrationState = { ...defaultState };
@@ -82,33 +91,39 @@ export default async function handler(req, res) {
         registrationState = { ...defaultState };
       }
       
-      // ✅ ALWAYS ensure state exists in database
+      // Ensure state exists in database
       await client.query(
         'INSERT INTO "System_State" (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = CURRENT_TIMESTAMP',
         ['registration_state', JSON.stringify(registrationState)]
       );
       
     } catch (stateError) {
-      console.error('❌ Error loading state, using default:', stateError);
+      console.error('❌ Error loading state:', stateError);
       registrationState = { ...defaultState };
       
-      // Force insert default state
       await client.query(
         'INSERT INTO "System_State" (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = CURRENT_TIMESTAMP',
         ['registration_state', JSON.stringify(registrationState)]
       );
     }
     
-    // Process the request
+    // Process requests
     if (req.method === 'GET') {
-      console.log('📥 ESP32 checking registration state:', registrationState);
-      return res.json(registrationState);
+      console.log('📥 GET request - returning state:', registrationState);
+      return res.status(200).json(registrationState);
     }
 
     if (req.method === 'POST') {
       const { action } = req.body;
+      console.log('📤 POST request - action:', action);
       
-      // ✅ PASS registrationState as parameter
+      if (!action) {
+        return res.status(400).json({ 
+          error: 'Action is required',
+          timestamp: new Date().toISOString()
+        });
+      }
+      
       switch (action) {
         case 'start_registration':
           return await startRegistration(req, res, client, registrationState);
@@ -135,19 +150,29 @@ export default async function handler(req, res) {
           return await resetState(req, res, client, registrationState);
         
         default:
-          return res.status(400).json({ error: 'Invalid action' });
+          return res.status(400).json({ 
+            error: 'Invalid action: ' + action,
+            validActions: ['start_registration', 'cancel_registration', 'submit_password', 'submit_card', 'complete_without_card', 'reset_state'],
+            timestamp: new Date().toISOString()
+          });
       }
     }
 
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ 
+      error: 'Method not allowed: ' + req.method,
+      timestamp: new Date().toISOString()
+    });
 
   } catch (error) {
     console.error('❌ Admin API Error:', error);
+    console.error('❌ Error details:', error.message);
     console.error('❌ Error stack:', error.stack);
+    
     return res.status(500).json({ 
       error: 'Internal server error',
-      detail: process.env.NODE_ENV === 'development' ? error.message : 'Server error',
-      action: req.body?.action || 'unknown'
+      detail: error.message,
+      action: req.body?.action || 'unknown',
+      timestamp: new Date().toISOString()
     });
   } finally {
     if (client) {
