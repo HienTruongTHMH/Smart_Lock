@@ -1,7 +1,7 @@
 {
   "version": 2,
   "buildCommand": "",
-  "outputDirectory": "api",
+  "outputDirectory": "public",
   "installCommand": "npm install",
   "headers": [
     {
