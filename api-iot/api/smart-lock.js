@@ -77,6 +77,11 @@ export default async function handler(req, res) {
         console.log('🔐 Processing registration input from ESP32');
         return await processRegistration(req, res, client);
       
+      // ✅ THÊM: Handle complete without card
+      case 'complete_without_card':
+        console.log('⏩ Processing complete without card');
+        return await completeWithoutCard(req, res, client);
+      
       // =================== ACCESS LOGGING ===================
       case 'log_access':
         console.log('📝 Processing log_access action');
@@ -782,5 +787,83 @@ async function processRegistration(req, res, client) {
       currentState: registrationState.step,
       inputType: type
     });
+  }
+}
+
+// ✅ THÊM: Complete without card function
+async function completeWithoutCard(req, res, client) {
+  console.log('⏩ Completing registration without card from ESP32');
+  
+  // Load current registration state
+  const stateResult = await client.query(
+    'SELECT value FROM "System_State" WHERE key = $1',
+    ['registration_state']
+  );
+  
+  if (stateResult.rows.length === 0) {
+    return res.json({
+      success: false,
+      error: 'No active registration'
+    });
+  }
+  
+  let registrationState = stateResult.rows[0].value;
+  
+  if (!registrationState.isActive || registrationState.step !== 'password_set') {
+    return res.json({
+      success: false,
+      error: 'Invalid state for completion'
+    });
+  }
+  
+  await client.query('BEGIN');
+  
+  try {
+    // Generate user ID
+    const userIdResult = await client.query(
+      'SELECT COALESCE(MAX(id_user), 0) + 1 as next_id FROM "Manager_Sign_In"'
+    );
+    const newUserId = userIdResult.rows[0].next_id;
+    
+    // Generate name
+    const userName = registrationState.userData?.fullName || `User${String(newUserId).padStart(3, '0')}`;
+    
+    // Insert new user without card
+    const insertResult = await client.query(
+      `INSERT INTO "Manager_Sign_In" (id_user, "Full_Name", private_pwd) 
+       VALUES ($1, $2, $3) RETURNING *`,
+      [newUserId, userName, registrationState.password]
+    );
+    
+    // Reset state
+    registrationState = {
+      isActive: false,
+      step: 'waiting',
+      targetUserId: null,
+      userData: null,
+      password: null,
+      uid: null,
+      startTime: null,
+      message: 'Đăng ký thành công'
+    };
+    
+    await client.query(
+      'UPDATE "System_State" SET value = $1 WHERE key = $2',
+      [JSON.stringify(registrationState), 'registration_state']
+    );
+    
+    await client.query('COMMIT');
+    
+    return res.json({
+      success: true,
+      message: 'Registration completed without card',
+      user: {
+        id: insertResult.rows[0].id_user,
+        name: insertResult.rows[0].Full_Name
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
   }
 }

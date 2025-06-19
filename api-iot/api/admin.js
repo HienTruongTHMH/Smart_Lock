@@ -101,6 +101,10 @@ export default async function handler(req, res) {
         case 'complete_without_card':
           return await completeWithoutUID(req, res, client);
         
+        // ✅ THÊM: Reset state API
+        case 'reset_state':
+          return await resetState(req, res, client);
+        
         default:
           return res.status(400).json({ error: 'Invalid action' });
       }
@@ -249,38 +253,54 @@ async function scanUID(req, res, client) {
 async function completeWithoutUID(req, res, client) {
   console.log('📝 Completing registration without UID');
   
-  registrationState.uid = null;
-  
-  // ✅ THÊM: Lưu state vào database
-  await client.query(
-    'UPDATE "System_State" SET value = $1 WHERE key = $2',
-    [JSON.stringify(registrationState), 'registration_state']
+  // ✅ Load current state from database
+  const stateResult = await client.query(
+    'SELECT value FROM "System_State" WHERE key = $1',
+    ['registration_state']
   );
   
-  return await completeRegistration(req, res, client);
-}
-
-async function completeRegistration(req, res, client) {
+  if (stateResult.rows.length === 0) {
+    return res.status(400).json({ 
+      success: false,
+      error: 'No registration state found' 
+    });
+  }
+  
+  let registrationState = stateResult.rows[0].value;
+  
+  if (!registrationState.isActive || registrationState.step !== 'password_set') {
+    return res.status(400).json({ 
+      success: false,
+      error: 'Invalid state for completion',
+      currentState: registrationState
+    });
+  }
+  
   if (!registrationState.password) {
-    return res.status(400).json({ error: 'Password not set' });
+    return res.status(400).json({ 
+      success: false,
+      error: 'Password not set' 
+    });
   }
 
+  await client.query('BEGIN');
+  
   try {
     // Generate user ID
-    const userIdResult = await client.query('SELECT COALESCE(MAX(id_user), 0) + 1 as next_id FROM "Manager_Sign_In"');
+    const userIdResult = await client.query(
+      'SELECT COALESCE(MAX(id_user), 0) + 1 as next_id FROM "Manager_Sign_In"'
+    );
     const newUserId = userIdResult.rows[0].next_id;
     
     // Generate name - use provided name or auto-generate
     const userName = registrationState.userData?.fullName || `User${String(newUserId).padStart(3, '0')}`;
     
-    // ✅ SỬA: Không dùng created_at vì không có trong cấu trúc gốc
+    // Insert new user without card
     const insertResult = await client.query(
-      `INSERT INTO "Manager_Sign_In" (id_user, "Full_Name", private_pwd, "UID") 
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [newUserId, userName, registrationState.password, registrationState.uid]
+      `INSERT INTO "Manager_Sign_In" (id_user, "Full_Name", private_pwd) 
+       VALUES ($1, $2, $3) RETURNING *`,
+      [newUserId, userName, registrationState.password]
     );
-
-    console.log('✅ Registration completed for:', userName);
     
     // Reset state
     registrationState = {
@@ -291,31 +311,63 @@ async function completeRegistration(req, res, client) {
       password: null,
       uid: null,
       startTime: null,
-      message: 'Đăng ký thành công'
+      message: 'Đăng ký thành công không có thẻ'
     };
     
-    // ✅ THÊM: Lưu state vào database
     await client.query(
       'UPDATE "System_State" SET value = $1 WHERE key = $2',
       [JSON.stringify(registrationState), 'registration_state']
     );
     
+    await client.query('COMMIT');
+    
+    console.log('✅ Registration completed without card for:', userName);
+    
     return res.json({
       success: true,
-      message: 'User registered successfully',
+      message: 'Registration completed without card',
       user: {
         id: insertResult.rows[0].id_user,
-        name: insertResult.rows[0].Full_Name,
-        uid: insertResult.rows[0].UID
+        name: insertResult.rows[0].Full_Name
       }
     });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('❌ Complete registration error:', error);
     return res.status(500).json({ 
+      success: false,
       error: 'Failed to complete registration', 
       detail: error.message 
     });
   }
+}
+
+// ✅ THÊM: Reset state function
+async function resetState(req, res, client) {
+  console.log('🔄 Resetting registration state to default');
+  
+  const defaultState = {
+    isActive: false,
+    step: 'waiting',
+    targetUserId: null,
+    userData: null,
+    password: null,
+    uid: null,
+    startTime: null,
+    message: 'State đã được reset'
+  };
+  
+  // Lưu state vào database
+  await client.query(
+    'UPDATE "System_State" SET value = $1 WHERE key = $2',
+    [JSON.stringify(defaultState), 'registration_state']
+  );
+  
+  return res.json({ 
+    success: true, 
+    message: 'State reset successfully',
+    state: defaultState
+  });
 }
 
 // =================== CARD MANAGEMENT ===================
