@@ -1,28 +1,30 @@
 import { setupCors, handleOptions } from './_cors.js';
-const { Pool } = require('pg');
-
-// Global registration state
-let registrationState = {
-  isActive: false,
-  step: 'waiting', // waiting, password_input, password_set, card_scan, add_card
-  targetUserId: null,
-  userData: null,
-  password: null,
-  uid: null,
-  startTime: null
-};
 
 export default async function handler(req, res) {
+  // ✅ Setup CORS
   setupCors(res);
   
+  // ✅ Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  const pool = new Pool({
-    connectionString: process.env.POSTGRES_URL,
-    ssl: { rejectUnauthorized: false }
-  });
+  const { Pool } = require('pg');
+  
+  if (!process.env.POSTGRES_URL) {
+    return res.status(500).json({ error: 'Database connection not configured' });
+  }
+
+  // Global registration state
+  let registrationState = {
+    isActive: false,
+    step: 'waiting', // waiting, password_input, password_set, card_scan, add_card
+    targetUserId: null,
+    userData: null,
+    password: null,
+    uid: null,
+    startTime: null
+  };
 
   try {
     if (req.method === 'GET') {

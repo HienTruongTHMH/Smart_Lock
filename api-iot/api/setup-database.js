@@ -2,13 +2,18 @@ const { Pool } = require('pg');
 import { setupCors, handleOptions } from './_cors.js';
 
 export default async function handler(req, res) {
+  // ✅ Setup CORS
   setupCors(res);
   
+  // ✅ Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
+  console.log('🔌 Starting database setup...');
+
   if (!process.env.POSTGRES_URL) {
+    console.error('❌ POSTGRES_URL not found');
     return res.status(500).json({ 
       success: false, 
       error: 'POSTGRES_URL environment variable not found'

@@ -2,8 +2,10 @@ import { Pool } from 'pg';
 import { setupCors, handleOptions } from './_cors.js';
 
 export default async function handler(req, res) {
+  // ✅ Setup CORS
   setupCors(res);
   
+  // ✅ Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
