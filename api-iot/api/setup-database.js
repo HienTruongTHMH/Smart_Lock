@@ -1,4 +1,4 @@
-import { Pool } = require('pg');
+const { Pool } = require('pg');
 import { setupCors, handleOptions } from './_cors.js';
 
 export default async function handler(req, res) {
