@@ -2,7 +2,7 @@ const { Pool } = require('pg');
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -26,51 +26,54 @@ export default async function handler(req, res) {
     
     console.log('🔌 Creating database tables...');
     
-    // Tạo bảng management
+    // ✅ TẠO BẢNG ĐÚNG TÊN VỚI CODE
     await client.query(`
-      CREATE TABLE IF NOT EXISTS management (
+      CREATE TABLE IF NOT EXISTS "Manager_Sign_In" (
         id_user SERIAL PRIMARY KEY,
-        user_name VARCHAR(100) NOT NULL,
-        pwd_private VARCHAR(50) NOT NULL,
-        pwd_public VARCHAR(50) NOT NULL,
-        uid VARCHAR(20) UNIQUE NOT NULL,
+        "Full_Name" VARCHAR(100) NOT NULL,
+        private_pwd VARCHAR(10),
+        "UID" VARCHAR(50),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
     
-    // Tạo bảng time_tracking
     await client.query(`
-      CREATE TABLE IF NOT EXISTS time_tracking (
+      CREATE TABLE IF NOT EXISTS "Manager_Access_Log" (
         id SERIAL PRIMARY KEY,
-        id_user INTEGER REFERENCES management(id_user) ON DELETE CASCADE,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        method VARCHAR(20) NOT NULL,
-        status VARCHAR(20) NOT NULL,
-        success BOOLEAN DEFAULT true
+        "User_ID" INTEGER REFERENCES "Manager_Sign_In"(id_user),
+        "Method" VARCHAR(20) NOT NULL,
+        "Identifier" VARCHAR(100) NOT NULL,
+        "Success" BOOLEAN NOT NULL,
+        "Check_Status" VARCHAR(10),
+        "Time_Tracking" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // ✅ THÊM USER MẪU NẾU CHƯA CÓ
+    const userCount = await client.query('SELECT COUNT(*) as count FROM "Manager_Sign_In"');
     
-    // Thêm dữ liệu mẫu
-    await client.query(`
-      INSERT INTO management (user_name, pwd_private, pwd_public, uid) 
-      VALUES 
-        ('Admin', '1234', '0000', '67A21405'),
-        ('User Demo', '5678', '0000', 'ABCD1234')
-      ON CONFLICT (uid) DO NOTHING
-    `);
-    
-    // Kiểm tra dữ liệu
-    const countResult = await client.query('SELECT COUNT(*) as count FROM management');
-    const trackingCount = await client.query('SELECT COUNT(*) as count FROM time_tracking');
+    if (parseInt(userCount.rows[0].count) === 0) {
+      await client.query(`
+        INSERT INTO "Manager_Sign_In" ("Full_Name", private_pwd, "UID") VALUES 
+        ('Hien Truong', '1234', '67A21405'),
+        ('Admin User', '0000', NULL),
+        ('Test User', '9999', 'ABC12345')
+      `);
+      console.log('✅ Sample users created');
+    }
+
+    // Get final counts
+    const finalUserCount = await client.query('SELECT COUNT(*) as count FROM "Manager_Sign_In"');
+    const logCount = await client.query('SELECT COUNT(*) as count FROM "Manager_Access_Log"');
     
     client.release();
     
     res.json({ 
       success: true, 
       message: 'Database setup completed!',
-      tablesCreated: ['management', 'time_tracking'],
-      totalCards: parseInt(countResult.rows[0].count),
-      totalLogs: parseInt(trackingCount.rows[0].count)
+      tablesCreated: ['Manager_Sign_In', 'Manager_Access_Log'],
+      totalUsers: parseInt(finalUserCount.rows[0].count),
+      totalLogs: parseInt(logCount.rows[0].count)
     });
     
   } catch (err) {
@@ -80,5 +83,7 @@ export default async function handler(req, res) {
       error: 'Database setup failed', 
       detail: err.message 
     });
+  } finally {
+    await pool.end();
   }
 }
