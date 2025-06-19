@@ -11,7 +11,7 @@
         <h1 class="text-3xl font-bold text-center text-indigo-800 mb-8">🔐 Smart Lock Management</h1>
         
         <!-- Main Menu -->
-        <div id="mainMenu" class="bg-white rounded-lg shadow-lg p-6">
+        <div id="mainMenu" class="bg-white rounded-lg shadow-lg p-6 screen">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <button onclick="showUserList()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300">
                     👥 Danh sách người dùng
@@ -37,7 +37,7 @@
         </div>
 
         <!-- User List -->
-        <div id="userList" class="bg-white rounded-lg shadow-lg p-6 hidden">
+        <div id="userList" class="bg-white rounded-lg shadow-lg p-6 hidden screen">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-xl font-semibold">👥 Danh sách người dùng</h2>
                 <button onclick="showMainMenu()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded">
@@ -48,7 +48,7 @@
         </div>
 
         <!-- Access Log -->
-        <div id="accessLog" class="bg-white rounded-lg shadow-lg p-6 hidden">
+        <div id="accessLog" class="bg-white rounded-lg shadow-lg p-6 hidden screen">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-xl font-semibold">📊 Lịch sử ra vào</h2>
                 <button onclick="showMainMenu()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded">
@@ -59,7 +59,7 @@
         </div>
 
         <!-- Registration -->
-        <div id="registration" class="bg-white rounded-lg shadow-lg p-6 hidden">
+        <div id="registration" class="bg-white rounded-lg shadow-lg p-6 hidden screen">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-xl font-semibold">➕ Đăng ký người dùng mới</h2>
                 <button onclick="showMainMenu()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded">
@@ -81,7 +81,7 @@
         </div>
 
         <!-- Registration Status -->
-        <div id="registrationStatus" class="bg-white rounded-lg shadow-lg p-6 hidden">
+        <div id="registrationStatus" class="bg-white rounded-lg shadow-lg p-6 hidden screen">
             <div class="text-center">
                 <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
                 <h3 class="text-lg font-semibold mb-2" id="statusMessage">Đang khởi tạo...</h3>
@@ -93,7 +93,7 @@
         </div>
 
         <!-- Add Card -->
-        <div id="addCard" class="bg-white rounded-lg shadow-lg p-6 hidden">
+        <div id="addCard" class="bg-white rounded-lg shadow-lg p-6 hidden screen">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-xl font-semibold">🎫 Thêm thẻ RFID</h2>
                 <button onclick="showMainMenu()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded">
@@ -116,7 +116,7 @@
         </div>
 
         <!-- Add Card Status -->
-        <div id="addCardStatus" class="bg-white rounded-lg shadow-lg p-6 hidden">
+        <div id="addCardStatus" class="bg-white rounded-lg shadow-lg p-6 hidden screen">
             <div class="text-center">
                 <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto mb-4"></div>
                 <h3 class="text-lg font-semibold mb-2">Chờ quét thẻ RFID</h3>
@@ -130,7 +130,7 @@
 
     <script>
         // ✅ SỬA: Dùng URL Vercel cố định thay vì window.location.origin
-        const API_BASE = 'https://api-iot-v2-f0hnt20iv-hiens-projects-d1689d2e.vercel.app';
+        const API_BASE = 'https://api-iot-v2-i7vh19awb-hiens-projects-d1689d2e.vercel.app';
         const SMART_LOCK_API = API_BASE + '/api/smart-lock';
         const ADMIN_API = API_BASE + '/api/admin';
 
@@ -183,6 +183,7 @@
             });
             
             html += '</div>';
+            document.getElementById('userListContent').classList.remove('hidden');
             console.log('🔧 Generated HTML length:', html.length);
             return html;
         }
@@ -195,17 +196,11 @@
 
         function showUserList() {
             console.log('⚡️ showUserList called');
-            console.log('⚡️ Before: userList display =', 
-                window.getComputedStyle(document.getElementById('userList')).display);
-            
-            document.querySelectorAll('div[id]').forEach(div => {
-                div.classList.add('hidden');
-                console.log('Added hidden to:', div.id);
-            });
+    
+            // Chỉ ẩn các màn hình, KHÔNG ẩn các thẻ con!
+            document.querySelectorAll('.screen').forEach(div => div.classList.add('hidden'));
             
             document.getElementById('userList').classList.remove('hidden');
-            console.log('⚡️ After: userList display =', 
-                window.getComputedStyle(document.getElementById('userList')).display);
             
             loadUserList();
         }
@@ -306,16 +301,6 @@
                         content.innerHTML = `<p class="text-red-600">Lỗi: ${data.error || 'No users found'}</p>`;
                     }
 
-                    setTimeout(() => {
-                        const content = document.getElementById('userListContent');
-                        console.log('🔍 userListContent visibility:', 
-                            window.getComputedStyle(content).display,
-                            'Content HTML length:', content.innerHTML.length,
-                            'Parent visible:', window.getComputedStyle(content.parentElement).display);
-                        
-                        // Force hiển thị
-                        document.getElementById('userList').style.display = 'block';
-                        }, 1000);
                 } catch (error) {
                     console.error('❌ Error loading user list:', error);
                     document.getElementById('userListContent').innerHTML = 
