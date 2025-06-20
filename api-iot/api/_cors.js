@@ -1,8 +1,7 @@
 export function setupCors(req, res) {
   // ✅ Allow both web interface and ESP32 (no origin)
   const allowedOrigins = [
-    'https://api-iot-v2-4efa4bqzs-hiens-projects-d1689d2e.vercel.app',
-    'http://localhost:3000'
+    'https://api-iot-v2-4efa4bqzs-hiens-projects-d1689d2e.vercel.app'
   ];
   
   const origin = req.headers.origin;
