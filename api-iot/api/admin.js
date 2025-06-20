@@ -14,10 +14,10 @@ const defaultState = {
 };
 
 export default async function handler(req, res) {
-  // ✅ SỬA: Setup CORS cho tất cả requests
-  setupCors(res);
+  // ✅ SỬA: Pass both req and res
+  setupCors(req, res);
   
-  // ✅ SỬA: Handle OPTIONS request bằng function từ _cors.js
+  // ✅ SỬA: Handle OPTIONS with both parameters
   if (req.method === 'OPTIONS') {
     console.log('🔄 Admin API - Handling CORS preflight');
     return handleOptions(req, res);
@@ -171,12 +171,14 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('❌ Admin API Error:', error);
-    return handleError(error, res);
+    return handleError(error, req, res); // ✅ Pass req parameter
   } finally {
     if (client) {
       client.release();
+      console.log('🔌 Database connection released');
     }
-    await pool.end();
+    // ❌ REMOVE THIS LINE COMPLETELY:
+    // await pool.end();
   }
 }
 

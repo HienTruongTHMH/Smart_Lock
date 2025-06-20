@@ -1,7 +1,7 @@
 export function setupCors(req, res) {
   // ✅ Allow both web interface and ESP32 (no origin)
   const allowedOrigins = [
-    'https://smart-lock-by-git.vercel.app',
+    'https://api-iot-v2-4efa4bqzs-hiens-projects-d1689d2e.vercel.app',
     'http://localhost:3000'
   ];
   
@@ -36,12 +36,20 @@ export function handleOptions(req, res) {
   return res.status(200).end();
 }
 
-export function handleError(error, res) {
+export function handleError(error, req, res) {
   console.error('❌ API Error:', error);
   console.error('❌ Stack:', error.stack);
   
   // Ensure CORS headers are set even for errors
-  setupCors(req, res);
+  try {
+    setupCors(req, res);
+  } catch (corsError) {
+    console.error('❌ CORS Error:', corsError);
+    // Fallback CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
   
   return res.status(500).json({
     success: false,

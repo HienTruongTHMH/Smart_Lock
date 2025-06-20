@@ -9,11 +9,11 @@
 #include <time.h>
 
 // WiFi credentials
-const char* ssid = "MHEPro";
-const char* password_wifi = "0934752432";
+const char* ssid = "VNUK501&503";
+const char* password_wifi = "Z@q12wsx";
 
 // API endpoints
-const char* api_base_url = "https://api-iot-v2-4s8lsfdao-hiens-projects-d1689d2e.vercel.app";
+const char* api_base_url = "https://api-iot-v2-4efa4bqzs-hiens-projects-d1689d2e.vercel.app";
 const char* smart_lock_endpoint = "/api/smart-lock";
 const char* admin_endpoint = "/api/admin";
 
